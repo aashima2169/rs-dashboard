@@ -1,108 +1,102 @@
 import subprocess
 import sys
+import time
 
-# FORCE INSTALLATION
+# Auto-install requests if missing
 try:
-    import yfinance as yf
+    import requests
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
-    import yfinance as yf
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+    import requests
 
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(layout="wide", page_title="Reliable Sector Agent")
+st.set_page_config(layout="wide", page_title="Alpha Sector Agent")
 
-# MAPPING OFFICIAL INDICES
-# I've added Defense/Power/Ancillary equivalents supported by YF
+# CONFIGURATION
+API_KEY = "YOUR_API_KEY_HERE"  # <--- PASTE YOUR KEY HERE
+BENCHMARK = "NSE:NIFTY_500"
+
+# Mapping for Alpha Vantage (Format is EXCHANGE:SYMBOL)
+# Note: Alpha Vantage free tier coverage for India is best on major indices
 sectors = {
-    "Energy & Power": "^CNXENERGY",
-    "Auto (Includes Ancillaries)": "^CNXAUTO",
-    "Infrastructure": "^CNXINFRA",
-    "Real Estate": "^CNXREALTY",
-    "PSE (Govt/Defense Themes)": "^CNXPSE",
-    "FMCG": "^CNXFMCG",
-    "Bank Nifty": "^NSEBANK",
-    "PSU Bank": "^CNXPSUBANK",
-    "IT Index": "^CNXIT",
-    "Commodities": "^CNXCMDT",
-    "Pharma": "^CNXPHARMA",
-    "MNC Theme": "^CNXMNC",
-    "Metal": "^CNXMETAL",
-    "Services": "^CNXSERVICE",
-    "Media": "^CNXMEDIA"
+    "Power & Energy": "NSE:NIFTY_ENERGY",
+    "Infrastructure": "NSE:NIFTY_INFRA",
+    "Real Estate": "NSE:NIFTY_REALTY",
+    "PSE & Defense Proxy": "NSE:NIFTY_PSE",
+    "Auto Index": "NSE:NIFTY_AUTO",
+    "IT Services": "NSE:NIFTY_IT",
+    "Pharma": "NSE:NIFTY_PHARMA",
+    "FMCG": "NSE:NIFTY_FMCG",
+    "Metal": "NSE:NIFTY_METAL",
+    "Fin Services": "NSE:NIFTY_FIN_SERVICE",
+    "Media": "NSE:NIFTY_MEDIA"
 }
+st.title("🚀 Alpha Vantage Sector Agent")
+st.write("Using stable API connection for Institutional RS Confirmation.")
 
-st.title("🛡️ Institutional RS Agent (Index Pure)")
-
-@st.cache_data(ttl=3600)
-def get_reliable_data():
-    # Try Nifty 500 first, Fallback to Nifty 50 if it fails
-    benchmarks = ["^CNX500", "^NSEI"]
-    data_dict = {}
+def get_alpha_data(symbol):
+    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={API_KEY}'
+    r = requests.get(url)
+    data = r.json()
     
-    # Get Benchmarks
-    for b in benchmarks:
-        try:
-            temp = yf.download(b, period="1y", progress=False)['Adj Close']
-            if not temp.empty:
-                data_dict[b] = temp
-        except:
-            continue
-            
-    # Get Sectors
-    for name, ticker in sectors.items():
-        try:
-            temp = yf.download(ticker, period="1y", progress=False)['Adj Close']
-            if not temp.empty:
-                data_dict[ticker] = temp
-        except:
-            continue
-            
-    return pd.DataFrame(data_dict)
-
-try:
-    df = get_reliable_data()
-    
-    # Determine which benchmark to use
-    if "^CNX500" in df.columns and not df["^CNX500"].isnull().all():
-        bm = "^CNX500"
-        st.success("Using Nifty 500 Benchmark")
-    elif "^NSEI" in df.columns:
-        bm = "^NSEI"
-        st.warning("Nifty 500 unavailable. Using Nifty 50 (Stable) as Benchmark.")
+    if "Time Series (Daily)" in data:
+        # Convert to DataFrame
+        df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient='index')
+        df.index = pd.to_datetime(df.index)
+        return df['4. close'].astype(float).sort_index()
     else:
-        st.error("No benchmark data available. Yahoo Finance might be down.")
-        st.stop()
+        return pd.Series()
+
+# MAIN EXECUTION
+try:
+    # 1. Fetch Benchmark
+    with st.spinner('Fetching Benchmark Data...'):
+        bm_series = get_alpha_data(BENCHMARK)
+        # If Nifty 500 fails, fallback to Nifty 50
+        if bm_series.empty:
+            bm_series = get_alpha_data("NSE:NIFTY_50")
+            st.warning("Nifty 500 not found, using Nifty 50.")
     
+    if bm_series.empty:
+        st.error("API Limit reached or Key invalid. Alpha Vantage allows 25 calls/day.")
+        st.stop()
+
     results = []
-    for name, ticker in sectors.items():
-        if ticker in df.columns and ticker != bm:
-            # RS Calculation
-            rs_line = df[ticker] / df[bm]
-            
-            # Use safe offsets for 3M (63 days) and 6M (126 days)
-            try:
+    
+    # 2. Fetch Sectors (With a small delay to avoid API spamming)
+    for name, symbol in sectors.items():
+        with st.spinner(f'Analyzing {name}...'):
+            s_series = get_alpha_data(symbol)
+            if not s_series.empty:
+                # Align data
+                combined = pd.concat([s_series, bm_series], axis=1).dropna()
+                combined.columns = ['sector', 'benchmark']
+                
+                # Calculate RS Ratio
+                rs_line = combined['sector'] / combined['benchmark']
+                
+                # 3M and 6M Momentum
                 m3 = ((rs_line.iloc[-1] / rs_line.iloc[-63]) - 1) * 100
                 m6 = ((rs_line.iloc[-1] / rs_line.iloc[-126]) - 1) * 100
                 
                 status = "✅ CONFIRMED" if (m3 > 0 and m6 > 0) else "❌ NO SIGNAL"
                 
                 results.append({
-                    "Sector Index": name,
+                    "Sector": name,
                     "3M RS %": round(m3, 2),
                     "6M RS %": round(m6, 2),
                     "Signal": status
                 })
-            except:
-                continue
+                # Alpha Vantage free tier needs a tiny gap between calls
+                time.sleep(0.5)
 
     final_df = pd.DataFrame(results).sort_values("3M RS %", ascending=False)
-
     st.table(final_df.style.applymap(
         lambda x: 'background-color: #1e4620; color: white' if x == "✅ CONFIRMED" else '',
         subset=['Signal']
     ))
 
 except Exception as e:
-    st.error(f"Critical System Error: {e}")
+    st.error(f"System Error: {e}")
