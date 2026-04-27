@@ -8,14 +8,16 @@ try:
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
     import requests
-
-import streamlit as st
 import pandas as pd
 
-st.set_page_config(layout="wide", page_title="Alpha Sector Agent")
+import os
+import streamlit as st
 
-# CONFIGURATION
-API_KEY = "8GABLUVTFVXLDX6R"  # <--- PASTE YOUR KEY HERE
+# This handles both Streamlit Secrets and GitHub Secrets
+if "ALPHA_VANTAGE_KEY" in st.secrets:
+    API_KEY = st.secrets["ALPHA_VANTAGE_KEY"]
+else:
+    API_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "YOUR_LOCAL_KEY_HERE")
 BENCHMARK = "NSE:NIFTY_500"
 
 # Mapping for Alpha Vantage (Format is EXCHANGE:SYMBOL)
