@@ -49,11 +49,11 @@ def run_agent():
                 m6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
                 
                 # QUADRANT LOGIC (Based on 1M and 6M for long-term structure)
-                if m1 > 0 and m6 > 0:
+                if m3 > 0 and m6 > 0:
                     quadrant = "🚀 LEAD"
-                elif m1 < 0 and m6 > 0:
+                elif m3 < 0 and m6 > 0:
                     quadrant = "⚠️ WEAK"
-                elif m1 > 0 and m6 < 0:
+                elif m3 > 0 and m6 < 0:
                     quadrant = "📈 IMPROV"
                 else:
                     quadrant = "😴 LAGG"
