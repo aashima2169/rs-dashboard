@@ -26,14 +26,17 @@ sectors = {
     "Power & Energy": "NSE:NIFTY_ENERGY",
     "Infrastructure": "NSE:NIFTY_INFRA",
     "Real Estate": "NSE:NIFTY_REALTY",
-    "PSE & Defense Proxy": "NSE:NIFTY_PSE",
+    "PSE (Govt/Defense)": "NSE:NIFTY_PSE",
     "Auto Index": "NSE:NIFTY_AUTO",
-    "IT Services": "NSE:NIFTY_IT",
+    "IT Index": "NSE:NIFTY_IT",
     "Pharma": "NSE:NIFTY_PHARMA",
     "FMCG": "NSE:NIFTY_FMCG",
     "Metal": "NSE:NIFTY_METAL",
     "Fin Services": "NSE:NIFTY_FIN_SERVICE",
-    "Media": "NSE:NIFTY_MEDIA"
+    "Media": "NSE:NIFTY_MEDIA",
+    "Bank Nifty": "NSE:NIFTY_BANK",
+    "Commodities": "NSE:NIFTY_COMMODITIES",
+    "Consumption": "NSE:NIFTY_CONSUMPTION"
 }
 st.title("🚀 Alpha Vantage Sector Agent")
 st.write("Using stable API connection for Institutional RS Confirmation.")
