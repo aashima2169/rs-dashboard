@@ -26,7 +26,7 @@ def get_safe_close(df):
 
 def run_agent():
     try:
-        # Fetch 2y data to calculate 12M (approx 252 trading days)
+        # Fetch 2y data for 12M (252 trading days) calculation
         bm_raw = yf.download("^NSEI", period="2y", progress=False)
         bm_data = get_safe_close(bm_raw)
             
@@ -42,44 +42,45 @@ def run_agent():
                 combined.columns = ['s', 'b']
                 rs = combined['s'] / combined['b']
                 
-                # 1. CALCULATE MOMENTUM (3/6/12M)
+                # 1. MOMENTUM SCORES (Raw Numbers)
                 m3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
                 m6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
                 m12 = round(((rs.iloc[-1] / rs.iloc[-252]) - 1) * 100, 1)
                 
-                # 2. CALCULATE RS PERCENTILE (How strong is today vs last 252 days?)
-                # This matches the 'Percentile' logic in your screenshot
+                # 2. RS PERCENTILE (Matches PRC in your screenshot)
                 current_rs = rs.iloc[-1]
                 rs_history = rs.tail(252)
                 percentile = round((rs_history < current_rs).mean() * 100)
 
-                # 3. ASSIGN STATE
+                # 3. STATE LOGIC
                 if percentile > 80: state = "🚀 LEAD"
                 elif percentile > 50: state = "📈 IMPR"
                 else: state = "😴 LAGG"
 
                 results.append({
                     "name": name, "m3": m3, "m6": m6, "m12": m12, 
-                    "pct": percentile, "state": state
+                    "prc": percentile, "state": state
                 })
             except: continue
 
-        # Sort by Percentile (Strongest Relative Rank)
-        df = pd.DataFrame(results).sort_values("pct", ascending=False)
+        # Sort by PRC (Highest Percentile)
+        df = pd.DataFrame(results).sort_values("prc", ascending=False)
 
-        message = "🛡️ **PRO-GRADE RS SCANNER**\n\n"
-        message += "`SECTOR          3M   6M   12M  PRC%` \n"
+        message = "🛡️ **PRO RS SCANNER**\n\n"
+        message += "`SECTOR          3M   6M   12M  PRC ` \n"
         message += "`------------------------------------` \n"
         
         for _, row in df.iterrows():
+            # Formatting strings to maintain table structure without % signs
             name_p = row['name'].ljust(15)
             m3_p = str(row['m3']).ljust(4)
             m6_p = str(row['m6']).ljust(4)
             m12_p = str(row['m12']).ljust(4)
-            pct_p = str(row['pct']).ljust(4)
-            message += f"`{name_p} {m3_p} {m6_p} {m12_p} {pct_p}` **{row['state']}**\n"
+            prc_p = str(row['prc']).ljust(4)
+            
+            message += f"`{name_p} {m3_p} {m6_p} {m12_p} {prc_p}` **{row['state']}**\n"
 
-        message += "\n**PRC% (Percentile):** Current strength vs its own 1-year history."
+        message += "\n**PRC:** RS Percentile (0-100 scale)\n**3/6/12M:** Relative Momentum vs Nifty"
         
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       json={"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"})
