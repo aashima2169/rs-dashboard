@@ -4,7 +4,6 @@ import pandas as pd
 import subprocess
 import sys
 
-# Auto-install yfinance
 try:
     import yfinance as yf
 except ImportError:
@@ -16,44 +15,28 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 sectors = {
-    "Bank Nifty": "^NSEBANK",
-    "IT": "^CNXIT",
-    "Pharma": "^CNXPHARMA",
-    "FMCG": "^CNXFMCG",
-    "Metal": "^CNXMETAL",
-    "Auto": "^CNXAUTO",
-    "Realty": "^CNXREALTY",
-    "Energy": "^CNXENERGY",
-    "Infra": "^CNXINFRA",
-    "PSE (Govt)": "^CNXPSE",
-    "Commodities": "^CNXCMDT",
-    "Fin Service": "^CNXFIN"
+    "Bank Nifty": "^NSEBANK", "IT": "^CNXIT", "Pharma": "^CNXPHARMA",
+    "FMCG": "^CNXFMCG", "Metal": "^CNXMETAL", "Auto": "^CNXAUTO",
+    "Realty": "^CNXREALTY", "Energy": "^CNXENERGY", "Infra": "^CNXINFRA",
+    "PSE (Govt)": "^CNXPSE", "Commodities": "^CNXCMDT", "Fin Service": "^CNXFIN"
 }
 
 def get_safe_close(df):
-    """Checks if 'Adj Close' exists, otherwise returns 'Close'"""
-    if 'Adj Close' in df.columns:
-        return df['Adj Close']
+    if 'Adj Close' in df.columns: return df['Adj Close']
     return df['Close']
 
 def run_agent():
     try:
         # Fetch Benchmark (Nifty 50)
         bm_raw = yf.download("^NSEI", period="1y", progress=False)
-        if bm_raw.empty:
-            print("Error: Could not fetch Benchmark")
-            return
-        
         bm_data = get_safe_close(bm_raw)
             
-        confirmed = []
-        others = []
+        results = []
 
         for name, ticker in sectors.items():
             try:
                 s_raw = yf.download(ticker, period="1y", progress=False)
                 if s_raw.empty: continue
-                
                 s_data = get_safe_close(s_raw)
                 
                 # Align data
@@ -63,35 +46,54 @@ def run_agent():
                 # RS Ratio Calculation
                 rs = combined['s'] / combined['b']
                 
-                # Momentum (1M = 21 days, 3M = 63 days)
-                m_short = ((rs.iloc[-1] / rs.iloc[-21]) - 1) * 100
-                m_long = ((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100
+                # 20-Day Moving Average of RS (Institutional Trend)
+                rs_ma20 = rs.rolling(window=20).mean()
                 
-                line = f"• {name}: 1M {round(m_short,1)}% | 3M {round(m_long,1)}%"
+                # Momentum Calculations
+                m1 = round(((rs.iloc[-1] / rs.iloc[-21]) - 1) * 100, 1) # 1 Month
+                m3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1) # 3 Month
                 
-                if m_short > 0 and m_long > 0:
-                    confirmed.append(line)
+                # QUADRANT LOGIC
+                if m1 > 0 and m3 > 0:
+                    quadrant = "🚀 LEAD" # Leading
+                elif m1 < 0 and m3 > 0:
+                    quadrant = "⚠️ WEAK" # Weakening
+                elif m1 > 0 and m3 < 0:
+                    quadrant = "📈 IMPROV" # Improving
                 else:
-                    others.append(line)
-                    
-            except Exception as e:
-                print(f"Skipping {name}: {e}")
-                continue
+                    quadrant = "😴 LAGG" # Lagging
+
+                # TREND CHECK (Is it above its 20-day trend line?)
+                trend = "🔥" if rs.iloc[-1] > rs_ma20.iloc[-1] else "❄️"
+                
+                results.append({
+                    "name": name, "m1": m1, "m3": m3, 
+                    "quad": quadrant, "trend": trend
+                })
+            except: continue
+
+        # Sort by 1-Month Strength
+        df = pd.DataFrame(results).sort_values("m1", ascending=False)
 
         # PREPARE TELEGRAM MESSAGE
-        message = "🛡️ **WEEKLY SECTOR RS REPORT**\n\n"
-        message += "🚀 **INSTITUTIONAL LEADERS**\n" 
-        message += ("\n".join(confirmed) if confirmed else "None")
-        message += "\n\n😴 **LAGGARDS / SIDEWAYS**\n" 
-        message += ("\n".join(others) if others else "None")
+        message = "🛡️ **INSTITUTIONAL RS STRATEGY**\n\n"
+        message += "`SECTOR          1M%    3M%    STATE` \n"
+        message += "`------------------------------------` \n"
         
-        # SEND TO TELEGRAM
-        final_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(final_url, json={"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"})
-        print("Success! Message sent to Telegram.")
+        for _, row in df.iterrows():
+            name_p = row['name'].ljust(15)
+            m1_p = str(row['m1']).ljust(6)
+            m3_p = str(row['m3']).ljust(6)
+            # Quadrant + Trend Icon
+            message += f"`{name_p} {m1_p} {m3_p}` **{row['quad']}** {row['trend']}\n"
 
+        message += "\n**Legend:**\n🚀=Buy Leader | 📈=Watch for Entry\n⚠️=Book Profits | 😴=Avoid\n🔥=Trend Up | ❄️=Trend Down"
+        
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                      json={"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"})
+        
     except Exception as e:
-        print(f"Critical System Error: {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     run_agent()
