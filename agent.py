@@ -49,9 +49,10 @@ def run_agent():
                 r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
                 r6 = round(calc_percentile(rs.pct_change(126).tail(252)))
                 results.append({"name": name, "p3": p3, "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
-            except: continue
+            except:
+                continue
 
-        # Process Railways (Corrected Syntax)
+        # Process Railways
         try:
             rail_raw = yf.download(rail_tickers, period="3y", progress=False)['Adj Close']
             rail_index = rail_raw.mean(axis=1)
@@ -70,19 +71,25 @@ def run_agent():
                 "r6": r6_val, 
                 "prc": round((r3_val + r6_val) / 2)
             })
-        except: pass
+        except:
+            pass
 
         df = pd.DataFrame(results).sort_values("prc", ascending=False)
 
-        # Build Reports
+        # Build Message
         msg = "📊 **RANKING & VELOCITY**\n`SECTOR        PRC  3M_%` \n`------------------------` \n"
         for _, row in df.iterrows():
             msg += f"`{row['name'].ljust(12)} {str(row['prc']).ljust(4)} {str(row['p3']).ljust(5)}` \n"
 
-        # Automated Summary
+        # Strategy Summary
         summary = "\n💡 **STRATEGY SUMMARY**\n"
         top = df.iloc[0]
         summary += f"✅ **TOP LEAD:** {top['name']} (PRC {top['prc']})\n"
         
-        # Improvement Logic
-        improving = df[df['r3'] > (df['r6'] +
+        # Reversal Logic
+        improving = df[df['r3'] > (df['r6'] + 15)].head(1)
+        if not improving.empty:
+            summary += f"🔄 **REVERSAL:** {improving.iloc[0]['name']} waking up.\n"
+        
+        # Avoid Logic
+        laggard =
