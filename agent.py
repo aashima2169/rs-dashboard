@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 sectors = {
-    "BankNifty": "^NSEBANK", "NiftyIT": "^CNXIT", "Pharma": "^CNXPHARMA",
+    "BankNifty": "^NSEBANK", "NiftyIT": "^CNXIT", "Pharma": "^CNXPHARMA","CPSE": "^CNXCPSE",
     "FMCG": "^CNXFMCG", "Metal": "^CNXMETAL", "Auto": "^CNXAUTO",
     "Realty": "^CNXREALTY", "Energy": "^CNXENERGY", "Infra": "^CNXINFRA",
     "PSE": "^CNXPSE", "FinServ": "^CNXFIN"
