@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-# FORCE INSTALLATION IF MISSING
+# FORCE INSTALLATION
 try:
     import yfinance as yf
 except ImportError:
@@ -11,53 +11,79 @@ except ImportError:
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(layout="wide", page_title="Sector Confirmation")
+st.set_page_config(layout="wide", page_title="Pure Sector Index Agent")
 
-# DEEP DRILL DOWN SECTORS
+# MAPPING ONLY OFFICIAL INDICES
 sectors = {
-    "Power Proxies": "^CNXENERGY",
-    "Defense Proxy": "BEL.NS",
-    "Auto Ancillaries": "SONACOMS.NS",
+    "Nifty 500 (BM)": "^CNX500",
+    "Energy & Power": "^CNXENERGY",
+    "Auto": "^CNXAUTO",
     "Infrastructure": "^CNXINFRA",
     "Real Estate": "^CNXREALTY",
-    "PSU Banks": "^CNXPSUBANK",
-    "Private Banks": "^NSEBANK",
-    "IT Services": "^CNXIT",
-    "Pharma": "^CNXPHARMA",
-    "FMCG": "^CNXFMCG",
-    "Auto OEMs": "^CNXAUTO",
-    "Metals": "^CNXMETAL",
-    "Consumer Durables": "^CNXCONDOM",
     "PSE (Govt Stocks)": "^CNXPSE",
+    "FMCG": "^CNXFMCG",
+    "Bank Nifty": "^NSEBANK",
+    "PSU Bank": "^CNXPSUBANK",
+    "IT Index": "^CNXIT",
+    "Commodities": "^CNXCMDT",
+    "Pharma": "^CNXPHARMA",
     "MNC Theme": "^CNXMNC",
     "Financial Services": "^CNXFIN",
-    "Commodities": "^CNXCMDT"
+    "Metal": "^CNXMETAL"
 }
 
-st.title("🛡️ Institutional RS Agent")
+st.title("📊 Pure Sector Index RS Agent")
 
 @st.cache_data(ttl=3600)
-def get_data():
-    tickers = list(sectors.values()) + ["^CNX500"]
-    return yf.download(tickers, period="1y")['Adj Close']
+def get_index_data():
+    # Fetching individually to prevent batch download errors
+    data_dict = {}
+    for name, ticker in sectors.items():
+        try:
+            df = yf.download(ticker, period="1y", progress=False)['Adj Close']
+            if not df.empty:
+                data_dict[ticker] = df
+        except:
+            continue
+    return pd.DataFrame(data_dict)
 
 try:
-    df = get_data()
+    df = get_index_data()
     bm = "^CNX500"
     
-    results = []
-    for name, ticker in sectors.items():
-        if ticker in df.columns:
-            rs_line = df[ticker] / df[bm]
-            # 3M and 6M Logic
-            m3 = ((rs_line.iloc[-1] / rs_line.iloc[-63]) - 1) * 100
-            m6 = ((rs_line.iloc[-1] / rs_line.iloc[-126]) - 1) * 100
+    if bm not in df.columns:
+        st.error("Benchmark Nifty 500 data unavailable. Check connection.")
+    else:
+        results = []
+        for name, ticker in sectors.items():
+            if ticker == bm or ticker not in df.columns:
+                continue
             
-            signal = "✅ CONFIRMED" if m3 > 0 and m6 > 0 else "❌ NO SIGNAL"
-            results.append({"Theme": name, "3M RS %": round(m3, 2), "6M RS %": round(m6, 2), "Signal": signal})
+            # RS Ratio Calculation
+            rs_line = df[ticker] / df[bm]
+            
+            # 3M and 6M momentum
+            try:
+                m3 = ((rs_line.iloc[-1] / rs_line.iloc[-63]) - 1) * 100
+                m6 = ((rs_line.iloc[-1] / rs_line.iloc[-126]) - 1) * 100
+                
+                signal = "✅ CONFIRMED" if (m3 > 0 and m6 > 0) else "❌ NO SIGNAL"
+                
+                results.append({
+                    "Index": name,
+                    "3M RS %": round(m3, 2),
+                    "6M RS %": round(m6, 2),
+                    "Signal": signal
+                })
+            except:
+                continue
 
-    final_df = pd.DataFrame(results).sort_values("3M RS %", ascending=False)
-    st.table(final_df)
-    
+        final_df = pd.DataFrame(results).sort_values("3M RS %", ascending=False)
+
+        def color_signal(val):
+            return 'background-color: #1e4620; color: white' if val == "✅ CONFIRMED" else ''
+
+        st.table(final_df.style.applymap(color_signal, subset=['Signal']))
+
 except Exception as e:
-    st.error(f"Waiting for market data... Error: {e}")
+    st.error(f"Error fetching Index data: {e}")
