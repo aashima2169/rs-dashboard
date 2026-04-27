@@ -15,14 +15,23 @@ st.set_page_config(layout="wide", page_title="Sector Confirmation")
 
 # DEEP DRILL DOWN SECTORS
 sectors = {
-    "Power Proxies": "PFC.NS",
-    "Defense": "BEL.NS",
+    "Power Proxies": "^CNXENERGY",
+    "Defense Proxy": "BEL.NS",
     "Auto Ancillaries": "SONACOMS.NS",
     "Infrastructure": "^CNXINFRA",
     "Real Estate": "^CNXREALTY",
-    "PSE": "^CNXPSE",
+    "PSU Banks": "^CNXPSUBANK",
+    "Private Banks": "^NSEBANK",
+    "IT Services": "^CNXIT",
+    "Pharma": "^CNXPHARMA",
     "FMCG": "^CNXFMCG",
-    "IT": "^CNXIT"
+    "Auto OEMs": "^CNXAUTO",
+    "Metals": "^CNXMETAL",
+    "Consumer Durables": "^CNXCONDOM",
+    "PSE (Govt Stocks)": "^CNXPSE",
+    "MNC Theme": "^CNXMNC",
+    "Financial Services": "^CNXFIN",
+    "Commodities": "^CNXCMDT"
 }
 
 st.title("🛡️ Institutional RS Agent")
