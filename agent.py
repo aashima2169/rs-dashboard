@@ -35,7 +35,7 @@ def run_agent():
         bm_data = get_safe_close(bm_raw)
         results = []
 
-        # Official Sectors
+        # Process Official Sectors
         for name, ticker in sectors.items():
             try:
                 s_raw = yf.download(ticker, period="3y", progress=False)
@@ -45,12 +45,13 @@ def run_agent():
                 rs = combined['s'] / combined['b']
                 
                 p3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
+                p6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
                 r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
                 r6 = round(calc_percentile(rs.pct_change(126).tail(252)))
-                results.append({"name": name, "p3": p3, "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
+                results.append({"name": name, "p3": p3, "p6": p6, "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
             except: continue
 
-        # Railways Basket
+        # Process Railways
         try:
             rail_raw = yf.download(rail_tickers, period="3y", progress=False)['Adj Close']
             rail_idx = rail_raw.mean(axis=1)
@@ -58,9 +59,10 @@ def run_agent():
             comb_r.columns = ['s', 'b']
             rs_r = comb_r['s'] / comb_r['b']
             p3_r = round(((rs_r.iloc[-1] / rs_r.iloc[-63]) - 1) * 100, 1)
+            p6_r = round(((rs_r.iloc[-1] / rs_r.iloc[-126]) - 1) * 100, 1)
             r3_r = round(calc_percentile(rs_r.pct_change(63).tail(252)))
             r6_r = round(calc_percentile(rs_r.pct_change(126).tail(252)))
-            results.append({"name": "Railways*", "p3": p3_r, "r3": r3_r, "r6": r6_r, "prc": round((r3_r+r6_r)/2)})
+            results.append({"name": "Railways*", "p3": p3_r, "p6": p6_r, "r3": r3_r, "r6": r6_r, "prc": round((r3_r+r6_r)/2)})
         except: pass
 
         df = pd.DataFrame(results).sort_values("prc", ascending=False)
@@ -70,9 +72,9 @@ def run_agent():
         for _, row in df.iterrows():
             msg += f"`{row['name'].ljust(12)} {str(row['r3']).ljust(5)} {str(row['r6']).ljust(5)} {str(row['prc']).ljust(3)}` \n"
 
-        msg += "\n🚀 **VELOCITY REPORT (%)**\n`SECTOR        3M_%   PRC` \n`------------------------` \n"
+        msg += "\n🚀 **VELOCITY REPORT (%)**\n`SECTOR        3M_%   6M_%` \n`---------------------------` \n"
         for _, row in df.iterrows():
-            msg += f"`{row['name'].ljust(12)} {str(row['p3']).ljust(6)} {str(row['prc']).ljust(3)}` \n"
+            msg += f"`{row['name'].ljust(12)} {str(row['p3']).ljust(6)} {str(row['p6']).ljust(6)}` \n"
 
         # Automated Summary
         summary = "\n💡 **STRATEGY SUMMARY**\n"
@@ -86,7 +88,7 @@ def run_agent():
         laggard = df.sort_values("prc").iloc[0]
         summary += f"🚫 **AVOID:** {laggard['name']} is currently dead money.\n"
 
-        final_msg = msg + summary + "\n*R=Percentile Rank, %=Raw Gain vs Nifty*"
+        final_msg = msg + summary + "\n*R=Rank, %=Gain vs Nifty. Rail is custom basket.*"
         
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       json={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
