@@ -15,11 +15,12 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 sectors = {
-    "BankNifty": "^NSEBANK", "NiftyIT": "^CNXIT", "Pharma": "^CNXPHARMA","CPSE": "^CNXCPSE",
+    "Power": "^CNXENERGY", "PSE": "^CNXPSE", "CPSE": "^CNXCPSE",
+    "BankNifty": "^NSEBANK", "NiftyIT": "^CNXIT", "Pharma": "^CNXPHARMA",
     "FMCG": "^CNXFMCG", "Metal": "^CNXMETAL", "Auto": "^CNXAUTO",
-    "Realty": "^CNXREALTY", "Energy": "^CNXENERGY", "Infra": "^CNXINFRA",
-    "PSE": "^CNXPSE", "FinServ": "^CNXFIN"
+    "Realty": "^CNXREALTY", "Infra": "^CNXINFRA"
 }
+rail_tickers = ["IRFC.NS", "RVNL.NS", "IRCON.NS", "RITES.NS"]
 
 def get_safe_close(df):
     return df['Adj Close'] if 'Adj Close' in df.columns else df['Close']
@@ -34,52 +35,62 @@ def run_agent():
         bm_data = get_safe_close(bm_raw)
         results = []
 
+        # Process Official Sectors
         for name, ticker in sectors.items():
             try:
                 s_raw = yf.download(ticker, period="3y", progress=False)
-                if s_raw.empty: continue
                 s_data = get_safe_close(s_raw)
-                
                 combined = pd.concat([s_data, bm_data], axis=1).dropna()
                 combined.columns = ['s', 'b']
                 rs = combined['s'] / combined['b']
                 
-                # --- CALCULATE % PERFORMANCE ---
-                pct3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
-                pct6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
-
-                # --- CALCULATE PERCENTILE RANK (R) ---
-                m3_series = rs.pct_change(63)
-                m6_series = rs.pct_change(126)
-                r3 = round(calc_percentile(m3_series.tail(252)))
-                r6 = round(calc_percentile(m6_series.tail(252)))
-                
-                # Master Score (PRC)
-                prc = round((r3 + r6) / 2)
-
-                results.append({
-                    "name": name, "p3": pct3, "r3": r3, "p6": pct6, "r6": r6, "prc": prc
-                })
+                p3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
+                r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
+                r6 = round(calc_percentile(rs.pct_change(126).tail(252)))
+                results.append({"name": name, "p3": p3, "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
             except: continue
+
+        # Process Railways
+        try:
+            rail_raw = yf.download(rail_tickers, period="3y", progress=False)['Adj Close']
+            rail_index = rail_raw.mean(axis=1)
+            combined_r = pd.concat([rail_index, bm_data], axis=1).dropna()
+            combined_r.columns = ['s', 'b']
+            rs_r = combined_r['s'] / combined_r['b']
+            p3_r = round(((rs_r.iloc[-1] / rs_r.iloc[-63]) - 1) * 100, 1)
+            r3_r = round(calc_percentile(rs_r.pct_change(63).tail(252))), r6_r = round(calc_percentile(rs_r.pct_change(126).tail(252)))
+            results.append({"name": "Railways*", "p3": p3_r, "r3": r3_r[0], "r6": r6_r, "prc": round((r3_r[0]+r6_r)/2)})
+        except: pass
 
         df = pd.DataFrame(results).sort_values("prc", ascending=False)
 
-        # Message 1: Percentile Focus (The Rank)
-        msg_prc = "📊 **RANKING REPORT (Percentiles)**\n"
-        msg_prc += "`SECTOR         3M_R  6M_R  PRC` \n"
-        msg_prc += "`------------------------------` \n"
+        # Build Reports
+        msg = "📊 **RANKING & VELOCITY**\n`SECTOR        PRC  3M_%` \n`------------------------` \n"
         for _, row in df.iterrows():
-            msg_prc += f"`{row['name'].ljust(12)} {str(row['r3']).ljust(5)} {str(row['r6']).ljust(5)} {str(row['prc']).ljust(3)}` \n"
+            msg += f"`{row['name'].ljust(12)} {str(row['prc']).ljust(4)} {str(row['p3']).ljust(5)}` \n"
 
-        # Message 2: Momentum Focus (The Raw %)
-        msg_pct = "\n🚀 **VELOCITY REPORT (Raw %)**\n"
-        msg_pct += "`SECTOR         3M_%   6M_%` \n"
-        msg_pct += "`---------------------------` \n"
-        for _, row in df.iterrows():
-            msg_pct += f"`{row['name'].ljust(12)} {str(row['p3']).ljust(6)} {str(row['p6']).ljust(6)}` \n"
-
-        final_msg = msg_prc + msg_pct + "\n*Note: R = Rank (0-100), % = Gain vs Nifty*"
+        # --- AUTOMATED SUMMARY LOGIC ---
+        summary = "\n💡 **STRATEGY SUMMARY**\n"
         
+        # 1. Top Pick (highest PRC and positive momentum)
+        top = df.iloc[0]
+        summary += f"✅ **TOP LEAD:** {top['name']} (PRC {top['prc']}). Trend is aggressive.\n"
+        
+        # 2. Reversal Watch (Improving 3M rank vs 6M rank)
+        improving = df[df['r3'] > df['r6'] + 20].head(1)
+        if not improving.empty:
+            summary += f"🔄 **REVERSAL:** {improving.iloc[0]['name']} is waking up.\n"
+        
+        # 3. Defensive Check
+        defensive = df[(df['name'].isin(['Pharma', 'FMCG'])) & (df['prc'] > 70)].head(1)
+        if not defensive.empty:
+            summary += f"🛡️ **SAFE HAVEN:** {defensive.iloc[0]['name']} is showing structural strength.\n"
+
+        # 4. Avoid
+        laggard = df.sort_values("prc").iloc[0]
+        summary += f"🚫 **AVOID:** {laggard['name']} is currently dead money.\n"
+
+        final_msg = msg + summary
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       json={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
         
