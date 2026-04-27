@@ -26,7 +26,6 @@ def get_safe_close(df):
     return df['Adj Close'] if 'Adj Close' in df.columns else df['Close']
 
 def calc_percentile(series):
-    if series.empty: return 0
     current = series.iloc[-1]
     return (series < current).mean() * 100
 
@@ -36,7 +35,7 @@ def run_agent():
         bm_data = get_safe_close(bm_raw)
         results = []
 
-        # Process Official Sectors
+        # Official Sectors
         for name, ticker in sectors.items():
             try:
                 s_raw = yf.download(ticker, period="3y", progress=False)
@@ -49,48 +48,46 @@ def run_agent():
                 r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
                 r6 = round(calc_percentile(rs.pct_change(126).tail(252)))
                 results.append({"name": name, "p3": p3, "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
-            except:
-                continue
+            except: continue
 
-        # Process Railways
+        # Railways Basket
         try:
             rail_raw = yf.download(rail_tickers, period="3y", progress=False)['Adj Close']
-            rail_index = rail_raw.mean(axis=1)
-            combined_r = pd.concat([rail_index, bm_data], axis=1).dropna()
-            combined_r.columns = ['s', 'b']
-            rs_r = combined_r['s'] / combined_r['b']
-            
-            p3_val = round(((rs_r.iloc[-1] / rs_r.iloc[-63]) - 1) * 100, 1)
-            r3_val = round(calc_percentile(rs_r.pct_change(63).tail(252)))
-            r6_val = round(calc_percentile(rs_r.pct_change(126).tail(252)))
-            results.append({"name": "Railways*", "p3": p3_val, "r3": r3_val, "r6": r6_val, "prc": round((r3_val + r6_val) / 2)})
-        except:
-            pass
+            rail_idx = rail_raw.mean(axis=1)
+            comb_r = pd.concat([rail_idx, bm_data], axis=1).dropna()
+            comb_r.columns = ['s', 'b']
+            rs_r = comb_r['s'] / comb_r['b']
+            p3_r = round(((rs_r.iloc[-1] / rs_r.iloc[-63]) - 1) * 100, 1)
+            r3_r = round(calc_percentile(rs_r.pct_change(63).tail(252)))
+            r6_r = round(calc_percentile(rs_r.pct_change(126).tail(252)))
+            results.append({"name": "Railways*", "p3": p3_r, "r3": r3_r, "r6": r6_r, "prc": round((r3_r+r6_r)/2)})
+        except: pass
 
         df = pd.DataFrame(results).sort_values("prc", ascending=False)
 
         # Build Message
-        msg = "📊 **RANKING & VELOCITY**\n`SECTOR        PRC  3M_%` \n`------------------------` \n"
+        msg = "📊 **RANKING REPORT (R)**\n`SECTOR        3M_R  6M_R  PRC` \n`------------------------------` \n"
         for _, row in df.iterrows():
-            msg += f"`{row['name'].ljust(12)} {str(row['prc']).ljust(4)} {str(row['p3']).ljust(5)}` \n"
+            msg += f"`{row['name'].ljust(12)} {str(row['r3']).ljust(5)} {str(row['r6']).ljust(5)} {str(row['prc']).ljust(3)}` \n"
 
-        # Strategy Summary
+        msg += "\n🚀 **VELOCITY REPORT (%)**\n`SECTOR        3M_%   PRC` \n`------------------------` \n"
+        for _, row in df.iterrows():
+            msg += f"`{row['name'].ljust(12)} {str(row['p3']).ljust(6)} {str(row['prc']).ljust(3)}` \n"
+
+        # Automated Summary
         summary = "\n💡 **STRATEGY SUMMARY**\n"
         top = df.iloc[0]
         summary += f"✅ **TOP LEAD:** {top['name']} (PRC {top['prc']})\n"
         
-        # Improvement Logic
         improving = df[df['r3'] > (df['r6'] + 15)].head(1)
         if not improving.empty:
-            summary += f"🔄 **REVERSAL:** {improving.iloc[0]['name']} waking up.\n"
+            summary += f"🔄 **REVERSAL:** {improving.iloc[0]['name']} is waking up.\n"
         
-        # Avoid Logic (Fixed the syntax error here)
         laggard = df.sort_values("prc").iloc[0]
-        summary += f"🚫 **AVOID:** {laggard['name']} is dead money.\n"
+        summary += f"🚫 **AVOID:** {laggard['name']} is currently dead money.\n"
 
-        final_msg = msg + summary
+        final_msg = msg + summary + "\n*R=Percentile Rank, %=Raw Gain vs Nifty*"
         
-        # Send to Telegram
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       json={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
         
