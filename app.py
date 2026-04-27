@@ -15,7 +15,7 @@ import pandas as pd
 st.set_page_config(layout="wide", page_title="Alpha Sector Agent")
 
 # CONFIGURATION
-API_KEY = "YOUR_API_KEY_HERE"  # <--- PASTE YOUR KEY HERE
+API_KEY = "8GABLUVTFVXLDX6R"  # <--- PASTE YOUR KEY HERE
 BENCHMARK = "NSE:NIFTY_500"
 
 # Mapping for Alpha Vantage (Format is EXCHANGE:SYMBOL)
