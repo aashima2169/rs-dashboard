@@ -18,16 +18,15 @@ sectors = {
     "Bank Nifty": "^NSEBANK", "IT": "^CNXIT", "Pharma": "^CNXPHARMA",
     "FMCG": "^CNXFMCG", "Metal": "^CNXMETAL", "Auto": "^CNXAUTO",
     "Realty": "^CNXREALTY", "Energy": "^CNXENERGY", "Infra": "^CNXINFRA",
-    "PSE (Govt)": "^CNXPSE", "Commodities": "^CNXCMDT", "Fin Service": "^CNXFIN"
+    "PSE (Govt)": "^CNXPSE", "Fin Service": "^CNXFIN"
 }
 
 def get_safe_close(df):
-    if 'Adj Close' in df.columns: return df['Adj Close']
-    return df['Close']
+    return df['Adj Close'] if 'Adj Close' in df.columns else df['Close']
 
 def run_agent():
     try:
-        # Fetching more data (2y) to ensure 6M calculations are accurate
+        # Fetch 2y data to calculate 12M (approx 252 trading days)
         bm_raw = yf.download("^NSEI", period="2y", progress=False)
         bm_data = get_safe_close(bm_raw)
             
@@ -43,41 +42,44 @@ def run_agent():
                 combined.columns = ['s', 'b']
                 rs = combined['s'] / combined['b']
                 
-                # Momentum Calculations (21, 63, 126 trading days)
-                m1 = round(((rs.iloc[-1] / rs.iloc[-21]) - 1) * 100, 1)
+                # 1. CALCULATE MOMENTUM (3/6/12M)
                 m3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
                 m6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
+                m12 = round(((rs.iloc[-1] / rs.iloc[-252]) - 1) * 100, 1)
                 
-                # QUADRANT LOGIC (Based on 1M and 6M for long-term structure)
-                if m3 > 0 and m6 > 0:
-                    quadrant = "🚀 LEAD"
-                elif m3 < 0 and m6 > 0:
-                    quadrant = "⚠️ WEAK"
-                elif m3 > 0 and m6 < 0:
-                    quadrant = "📈 IMPROV"
-                else:
-                    quadrant = "😴 LAGG"
+                # 2. CALCULATE RS PERCENTILE (How strong is today vs last 252 days?)
+                # This matches the 'Percentile' logic in your screenshot
+                current_rs = rs.iloc[-1]
+                rs_history = rs.tail(252)
+                percentile = round((rs_history < current_rs).mean() * 100)
+
+                # 3. ASSIGN STATE
+                if percentile > 80: state = "🚀 LEAD"
+                elif percentile > 50: state = "📈 IMPR"
+                else: state = "😴 LAGG"
 
                 results.append({
-                    "name": name, "m1": m1, "m3": m3, "m6": m6, "quad": quadrant
+                    "name": name, "m3": m3, "m6": m6, "m12": m12, 
+                    "pct": percentile, "state": state
                 })
             except: continue
 
-        df = pd.DataFrame(results).sort_values("m1", ascending=False)
+        # Sort by Percentile (Strongest Relative Rank)
+        df = pd.DataFrame(results).sort_values("pct", ascending=False)
 
-        message = "🛡️ **INSTITUTIONAL RS STRATEGY**\n\n"
-        # Adjusted header for mobile spacing
-        message += "`SECTOR          1M   3M   6M   STATE` \n"
+        message = "🛡️ **PRO-GRADE RS SCANNER**\n\n"
+        message += "`SECTOR          3M   6M   12M  PRC%` \n"
         message += "`------------------------------------` \n"
         
         for _, row in df.iterrows():
             name_p = row['name'].ljust(15)
-            m1_p = str(row['m1']).ljust(4)
             m3_p = str(row['m3']).ljust(4)
             m6_p = str(row['m6']).ljust(4)
-            message += f"`{name_p} {m1_p} {m3_p} {m6_p}` **{row['quad']}**\n"
+            m12_p = str(row['m12']).ljust(4)
+            pct_p = str(row['pct']).ljust(4)
+            message += f"`{name_p} {m3_p} {m6_p} {m12_p} {pct_p}` **{row['state']}**\n"
 
-        message += "\n**Logic:** 1M/3M/6M show % outperformance vs Nifty 50."
+        message += "\n**PRC% (Percentile):** Current strength vs its own 1-year history."
         
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       json={"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"})
