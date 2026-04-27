@@ -63,14 +63,7 @@ def run_agent():
             p3_val = round(((rs_r.iloc[-1] / rs_r.iloc[-63]) - 1) * 100, 1)
             r3_val = round(calc_percentile(rs_r.pct_change(63).tail(252)))
             r6_val = round(calc_percentile(rs_r.pct_change(126).tail(252)))
-            
-            results.append({
-                "name": "Railways*", 
-                "p3": p3_val, 
-                "r3": r3_val, 
-                "r6": r6_val, 
-                "prc": round((r3_val + r6_val) / 2)
-            })
+            results.append({"name": "Railways*", "p3": p3_val, "r3": r3_val, "r6": r6_val, "prc": round((r3_val + r6_val) / 2)})
         except:
             pass
 
@@ -86,10 +79,23 @@ def run_agent():
         top = df.iloc[0]
         summary += f"✅ **TOP LEAD:** {top['name']} (PRC {top['prc']})\n"
         
-        # Reversal Logic
+        # Improvement Logic
         improving = df[df['r3'] > (df['r6'] + 15)].head(1)
         if not improving.empty:
             summary += f"🔄 **REVERSAL:** {improving.iloc[0]['name']} waking up.\n"
         
-        # Avoid Logic
-        laggard =
+        # Avoid Logic (Fixed the syntax error here)
+        laggard = df.sort_values("prc").iloc[0]
+        summary += f"🚫 **AVOID:** {laggard['name']} is dead money.\n"
+
+        final_msg = msg + summary
+        
+        # Send to Telegram
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                      json={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
+        
+    except Exception as e:
+        print(f"Error: {e}")
+
+if __name__ == "__main__":
+    run_agent()
