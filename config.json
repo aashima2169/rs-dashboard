@@ -11,11 +11,11 @@
     "Realty": "^CNXREALTY",
     "Infra": "^CNXINFRA",
     "CPSE": "CPSEETF.NS",
-    "Defence": "HDFCPFDEF.NS",
+    "Defence": "MODEFENCE.NS",
     "Digital": "NETGIGETF.NS",
-    "Manufacturing": "MAKEINDIA.NS"
+    "Manufacturing": "ICICIMANF.NS"
   },
-  "always_scan": ["Defence", "Digital", "Manufacturing"],
+  "always_scan": ["Defence", "Digital"],
   "nse_index_mapping": {
     "NiftyIT": "NIFTY IT",
     "BankNifty": "NIFTY BANK",
