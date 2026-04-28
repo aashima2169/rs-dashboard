@@ -2,34 +2,29 @@
   "sectors": {
     "Power": "^CNXENERGY",
     "PSE": "^CNXPSE",
-    "BankNifty": "^NSEBANK",
-    "NiftyIT": "^CNXIT",
     "Pharma": "^CNXPHARMA",
-    "FMCG": "^CNXFMCG",
-    "Metal": "^CNXMETAL",
-    "Auto": "^CNXAUTO",
-    "Realty": "^CNXREALTY",
-    "Infra": "^CNXINFRA",
     "CPSE": "CPSEETF.NS",
-    "Defence": "MODEFENCE.NS",
-    "Digital": "NETGIGETF.NS",
-    "Manufacturing": "ICICIMANF.NS"
+    "Metal": "^CNXMETAL",
+    "Defence": "HAL.NS",
+    "Digital": "BHARTIARTL.NS",
+    "Manufacturing": "M&M.NS"
   },
   "always_scan": ["Defence", "Digital"],
   "nse_index_mapping": {
     "Power": "NIFTY ENERGY",
     "PSE": "NIFTY PSE",
-    "BankNifty": "NIFTY BANK",
-    "NiftyIT": "NIFTY IT",
     "Pharma": "NIFTY PHARMA",
-    "FMCG": "NIFTY FMCG",
-    "Metal": "NIFTY METAL",
-    "Auto": "NIFTY AUTO",
-    "Realty": "NIFTY REALTY",
-    "Infra": "NIFTY INFRA",
     "CPSE": "NIFTY CPSE",
+    "Metal": "NIFTY METAL",
     "Defence": "NIFTY INDIA DEFENCE",
     "Digital": "NIFTY INDIA DIGITAL",
     "Manufacturing": "NIFTY INDIA MANUFACTURING"
+  },
+  "fallback_constituents": {
+    "Defence": ["HAL.NS", "BEL.NS", "MAZDOCK.NS", "COCHINSHIP.NS", "BDL.NS", "BHARATFORG.NS", "GRSE.NS", "DATAPATTNS.NS"],
+    "Digital": ["BHARTIARTL.NS", "TCS.NS", "INFY.NS", "HCLTECH.NS", "ZOMATO.NS", "PBFINTECH.NS", "NYKAA.NS", "NETWEB.NS"],
+    "Manufacturing": ["M&M.NS", "TATASTEEL.NS", "HINDALCO.NS", "MARUTI.NS", "JSWSTEEL.NS", "RELIANCE.NS", "TATAELXSI.NS", "EICHERMOT.NS"],
+    "Power": ["NTPC.NS", "POWERGRID.NS", "TATAPOWER.NS", "ADANIGREEN.NS", "JSWENERGY.NS"],
+    "PSE": ["RECLTD.NS", "PFC.NS", "ONGC.NS", "GAIL.NS", "IOC.NS"]
   }
 }
