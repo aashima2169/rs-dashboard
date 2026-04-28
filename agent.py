@@ -41,21 +41,22 @@ def calc_percentile(series):
 
 def run_agent():
     try:
-        # Benchmark: Nifty 50
-        bm_raw = yf.download("^NSEI", period="3y", progress=False)
+        # Benchmark: Nifty 50 - Only 1 year of data needed for 3M & 6M RS
+        bm_raw = yf.download("^NSEI", period="1y", progress=False)
         bm_data = get_safe_close(bm_raw)
         results = []
 
         # --- A. Process Standard Sectors ---
         for name, ticker in sectors.items():
             try:
-                s_raw = yf.download(ticker, period="3y", progress=False)
+                s_raw = yf.download(ticker, period="1y", progress=False)
                 s_data = get_safe_close(s_raw)
                 combined = pd.concat([s_data, bm_data], axis=1).dropna()
                 combined.columns = ['s', 'b']
                 rs = combined['s'] / combined['b']
                 
                 # Math: Percent Gain vs Percentile Rank
+                # 3M = ~63 trading days, 6M = ~126 trading days
                 p3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
                 p6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
                 r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
@@ -73,7 +74,7 @@ def run_agent():
         for basket_name, tickers in custom_baskets.items():
             try:
                 # Average performance of the tickers in the basket
-                basket_raw = yf.download(tickers, period="3y", progress=False)['Adj Close']
+                basket_raw = yf.download(tickers, period="1y", progress=False)['Adj Close']
                 basket_idx = basket_raw.mean(axis=1)
                 comb_b = pd.concat([basket_idx, bm_data], axis=1).dropna()
                 comb_b.columns = ['s', 'b']
