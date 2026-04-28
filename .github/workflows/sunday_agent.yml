@@ -1,10 +1,12 @@
-name: Sunday RS Agent
+name: Multi-Agent Trading System
 
 on:
   schedule:
-    # This runs every Sunday at 14:30 UTC (which is 8:00 PM IST)
+    # Runs Monday-Friday at 10:30 UTC (4:00 PM IST) to catch market close signals
+    - cron: '30 10 * * 1-5'
+    # Keeps the Sunday run at 8:00 PM IST for weekly planning
     - cron: '30 14 * * 0'
-  workflow_dispatch: # This button allows you to run it manually anytime
+  workflow_dispatch: 
 
 jobs:
   report:
@@ -16,16 +18,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Install Dependencies
         run: |
-          pip install requests pandas
+          pip install requests pandas yfinance
 
-      - name: Run Sector Scan
+      - name: Run Sequential Agent Pipeline
         env:
-          # This pulls the secrets you saved in GitHub Settings
-          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+          # Note: ALPHA_VANTAGE is no longer needed since we switched to yfinance
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python agent.py
+        run: |
+          # Run Scout first to generate active_sectors.json
+          python agent.py
+          # Run Sniper second to read the JSON and find VCPs
+          python sniper_agent.py
