@@ -17,18 +17,18 @@
   },
   "always_scan": ["Defence", "Digital"],
   "nse_index_mapping": {
-    "NiftyIT": "NIFTY IT",
+    "Power": "NIFTY ENERGY",
+    "PSE": "NIFTY PSE",
     "BankNifty": "NIFTY BANK",
+    "NiftyIT": "NIFTY IT",
     "Pharma": "NIFTY PHARMA",
     "FMCG": "NIFTY FMCG",
     "Metal": "NIFTY METAL",
     "Auto": "NIFTY AUTO",
     "Realty": "NIFTY REALTY",
-    "PSE": "NIFTY PSE",
-    "Power": "NIFTY ENERGY",
     "Infra": "NIFTY INFRA",
     "CPSE": "NIFTY CPSE",
-    "Defence": "NIFTY IND DEFENCE",
+    "Defence": "NIFTY INDIA DEFENCE",
     "Digital": "NIFTY INDIA DIGITAL",
     "Manufacturing": "NIFTY INDIA MANUFACTURING"
   }
