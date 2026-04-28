@@ -2,7 +2,6 @@
   "sectors": {
     "Power": "^CNXENERGY",
     "PSE": "^CNXPSE",
-    "CPSE": "^CNXCPSE",
     "BankNifty": "^NSEBANK",
     "NiftyIT": "^CNXIT",
     "Pharma": "^CNXPHARMA",
@@ -10,18 +9,10 @@
     "Metal": "^CNXMETAL",
     "Auto": "^CNXAUTO",
     "Realty": "^CNXREALTY",
-    "Infra": "^CNXINFRA"
+    "Infra": "^CNXINFRA",
+    "CPSE": "CPSE.NS" 
   },
   "custom_baskets": {
     "Railways*": ["IRFC.NS", "RVNL.NS", "IRCON.NS", "RITES.NS"]
-  },
-  "nse_index_mapping": {
-    "NiftyIT": "NIFTY IT",
-    "BankNifty": "NIFTY BANK",
-    "Pharma": "NIFTY PHARMA",
-    "FMCG": "NIFTY FMCG",
-    "Metal": "NIFTY METAL",
-    "Auto": "NIFTY AUTO",
-    "Realty": "NIFTY REALTY"
   }
 }
