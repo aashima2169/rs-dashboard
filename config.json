@@ -10,9 +10,22 @@
     "Auto": "^CNXAUTO",
     "Realty": "^CNXREALTY",
     "Infra": "^CNXINFRA",
-    "CPSE": "CPSE.NS" 
+    "CPSE": "CPSEETF.NS"
   },
   "custom_baskets": {
     "Railways*": ["IRFC.NS", "RVNL.NS", "IRCON.NS", "RITES.NS"]
+  },
+  "nse_index_mapping": {
+    "NiftyIT": "NIFTY IT",
+    "BankNifty": "NIFTY BANK",
+    "Pharma": "NIFTY PHARMA",
+    "FMCG": "NIFTY FMCG",
+    "Metal": "NIFTY METAL",
+    "Auto": "NIFTY AUTO",
+    "Realty": "NIFTY REALTY",
+    "PSE": "NIFTY PSE",
+    "Power": "NIFTY ENERGY",
+    "Infra": "NIFTY INFRA",
+    "CPSE": "NIFTY CPSE"
   }
 }
