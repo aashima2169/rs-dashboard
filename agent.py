@@ -17,7 +17,6 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # 2. LOAD CONFIGURATION
-# This ensures you don't have to update this file when sectors change
 CONFIG_PATH = "config.json"
 
 if not os.path.exists(CONFIG_PATH):
@@ -41,6 +40,8 @@ def calc_percentile(series):
 
 def run_agent():
     try:
+        print("📊 SCOUT AGENT STARTED...")
+        
         # Benchmark: Nifty 50 - Only 1 year of data needed for 3M & 6M RS
         bm_raw = yf.download("^NSEI", period="1y", progress=False)
         bm_data = get_safe_close(bm_raw)
@@ -101,7 +102,9 @@ def run_agent():
             json.dump(active_sectors, f)
 
         # --- D. Build Telegram Message with ALL sectors ---
-        msg = "📊 **RANKING REPORT (R)**\n`SECTOR        3M_R  6M_R  PRC` \n`------------------------------` \n"
+        msg = "📊 **SCOUT REPORT - SECTOR RANKINGS**\n\n"
+        msg += "`SECTOR        3M_R  6M_R  PRC` \n"
+        msg += "`------------------------------` \n"
         for _, row in df.iterrows():
             msg += f"`{row['name'].ljust(12)} {str(row['r3']).ljust(5)} {str(row['r6']).ljust(5)} {str(row['prc']).ljust(3)}` \n"
 
@@ -122,19 +125,24 @@ def run_agent():
 
         # Show filtered sectors for Agent 2
         if active_sectors:
-            summary += f"\n🎯 **SECTORS FOR SCREENING:** {', '.join(active_sectors)}\n"
+            summary += f"\n🎯 **SECTORS FOR SNIPER:** {', '.join(active_sectors)}\n"
+            summary += f"✅ **SCOUT AGENT COMPLETED** - Passed {len(active_sectors)} sectors to Sniper"
         else:
-            summary += f"\n🎯 **SECTORS FOR SCREENING:** None qualify (need 3M & 6M RS > 10%)\n"
+            summary += f"\n🎯 **SECTORS FOR SNIPER:** None qualify (need 3M & 6M RS > 10%)\n"
+            summary += f"⚠️ **SCOUT AGENT COMPLETED** - No sectors passed filter"
 
-        final_msg = msg + summary + "\n*R=Rank, %=Gain vs Nifty. Filtered sectors synced for Agent 2.*"
-        
+        final_msg = msg + summary
+
         # Send to Telegram
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       json={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
         
-        print(f"Analysis complete. Active sectors for Sniper: {active_sectors}")
+        print(f"✅ SCOUT AGENT COMPLETED. Active sectors for Sniper: {active_sectors}")
         
     except Exception as e:
+        error_msg = f"❌ **SCOUT AGENT FAILED**\n`Error: {str(e)}`"
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                     json={"chat_id": CHAT_ID, "text": error_msg, "parse_mode": "Markdown"})
         print(f"Error in run_agent: {e}")
 
 if __name__ == "__main__":
