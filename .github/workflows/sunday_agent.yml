@@ -2,9 +2,9 @@ name: Multi-Agent Trading System
 
 on:
   schedule:
-    # Runs Monday-Friday at 10:30 UTC (4:00 PM IST) to catch market close signals
+    # Runs Monday-Friday at 10:30 UTC (4:00 PM IST)
     - cron: '30 10 * * 1-5'
-    # Keeps the Sunday run at 8:00 PM IST for weekly planning
+    # Sunday run at 8:00 PM IST
     - cron: '30 14 * * 0'
   workflow_dispatch: 
 
@@ -22,15 +22,16 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests pandas yfinance
+          python -m pip install --upgrade pip
+          # Added nsepython and scipy (nsepython requirement) here
+          pip install requests pandas yfinance nsepython scipy
 
       - name: Run Sequential Agent Pipeline
         env:
-          # Note: ALPHA_VANTAGE is no longer needed since we switched to yfinance
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Run Scout first to generate active_sectors.json
+          # Run Scout first
           python agent.py
-          # Run Sniper second to read the JSON and find VCPs
+          # Run Sniper second
           python sniper_agent.py
