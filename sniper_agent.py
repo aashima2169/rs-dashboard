@@ -35,52 +35,47 @@ def get_nifty_constituents(index_name):
 def professional_screen(ticker):
     """
     Advanced Filter: 
-    1. EMA Alignment (20 > 50 > 100)
-    2. Market Cap > 500 Cr (Avoid Penny Stocks)
-    3. VCP Tightness Check
+    1. EMA Alignment (Stage 2 Uptrend: Price > E50 > E100)
+    2. Proximity Filter (Price within 5% of 20 EMA)
+    3. VCP Tightness Check (< 0.9 for both tight & trending tightness)
     """
     try:
-        # Fetch fundamental data for Market Cap
-        t_obj = yf.Ticker(ticker)
-        mkt_cap = t_obj.info.get('marketCap', 0)
-        
-        # Filter: Only Mid/Large Cap (Minimum 500 Crore INR)
-        if mkt_cap < 5000000000: 
-            return None
-
-        # Fetch historical data
         df = yf.download(ticker, period="1y", progress=False)
         if len(df) < 100: 
             return None
-
-        close = df['Close']
         
-        # 1. EMA CALCULATIONS
-        ema20 = close.ewm(span=20, adjust=False).mean().iloc[-1]
-        ema50 = close.ewm(span=50, adjust=False).mean().iloc[-1]
-        ema100 = close.ewm(span=100, adjust=False).mean().iloc[-1]
+        close = df['Close']
         curr_price = close.iloc[-1]
-
-        # FILTER: EMA ALIGNMENT (Trend Strength)
-        if not (curr_price > ema20 > ema50 > ema100):
+        
+        # 1. EMA ALIGNMENT (Trend Check)
+        e20 = close.ewm(span=20).mean().iloc[-1]
+        e50 = close.ewm(span=50).mean().iloc[-1]
+        e100 = close.ewm(span=100).mean().iloc[-1]
+        
+        # Must be in a Stage 2 Uptrend
+        if not (curr_price > e50 > e100): 
             return None
 
-        # 2. VCP TIGHTNESS MATH
+        # 2. PROXIMITY FILTER (Don't buy extended)
+        # Price shouldn't be more than 5% away from the 20 EMA
+        if curr_price > (e20 * 1.05): 
+            return None
+
+        # 3. VOLATILITY CONTRACTION (VCP)
+        # Loosening from 0.7 to 0.9 to allow for 'Trending Tightness'
         high10, low10 = df['High'].tail(10).max(), df['Low'].tail(10).min()
         high30, low30 = df['High'].iloc[-40:-10].max(), df['Low'].iloc[-40:-10].min()
         
         tightness = (high10 - low10) / (high30 - low30)
 
-        # FINAL VERDICT
-        if tightness < 0.7:
+        if tightness < 0.9: 
             return {
                 "ticker": ticker, 
                 "price": round(curr_price, 2), 
-                "mkt_cap_cr": round(mkt_cap / 10000000),
                 "tightness": round(tightness, 2)
             }
         return None
-    except Exception as e:
+    except: 
         return None
 
 def run_sniper():
@@ -138,11 +133,11 @@ def run_sniper():
         if all_candidates:
             msg = f"🎯 **SNIPER REPORT - VCP SCAN**\n"
             msg += f"`Total Screened: {total_screened} | Qualified: {len(all_candidates)}`\n\n"
-            msg += "`TICKER  SECTOR   PRICE    TIGHT  MKT_CAP_CR`\n"
-            msg += "`------  -------  -------  -----  ----------`\n"
+            msg += "`TICKER  SECTOR   PRICE    TIGHT`\n"
+            msg += "`------  -------  -------  -----`\n"
             
             for candidate in all_candidates[:10]:  # Top 10
-                msg += f"`{candidate['ticker'].ljust(7)} {candidate['sector'].ljust(8)} {str(candidate['price']).ljust(7)} {str(candidate['tightness']).ljust(5)} {candidate['mkt_cap_cr']}`\n"
+                msg += f"`{candidate['ticker'].ljust(7)} {candidate['sector'].ljust(8)} {str(candidate['price']).ljust(7)} {candidate['tightness']}`\n"
             
             if len(all_candidates) > 10:
                 msg += f"\n`... and {len(all_candidates) - 10} more candidates`\n"
@@ -151,7 +146,7 @@ def run_sniper():
         else:
             msg = f"🎯 **SNIPER REPORT - VCP SCAN**\n"
             msg += f"`Total Screened: {total_screened} | Qualified: 0`\n"
-            msg += f"`No stocks passed the VCP filter (EMA alignment + Market Cap + Tightness)`\n\n"
+            msg += f"`No stocks passed the VCP filter (Stage 2 Uptrend + Proximity + Tightness < 0.9)`\n\n"
             msg += f"✅ **SNIPER AGENT COMPLETED** (No candidates found)"
         
         # Send to Telegram
