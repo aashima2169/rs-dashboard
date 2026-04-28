@@ -94,12 +94,12 @@ def run_agent():
         # --- C. Rank Results & Save Hand-off ---
         df = pd.DataFrame(results).sort_values("prc", ascending=False)
 
-        # SAVE FOR AGENT 2: Only sectors with PRC > 70 (The Leaders)
-        active_sectors = df[df['prc'] >= 70]['name'].tolist()
+        # SAVE FOR AGENT 2: Only sectors where BOTH 3M & 6M RS > 10%
+        active_sectors = df[(df['p3'] > 10) & (df['p6'] > 10)]['name'].tolist()
         with open('active_sectors.json', 'w') as f:
             json.dump(active_sectors, f)
 
-        # --- D. Build Telegram Message ---
+        # --- D. Build Telegram Message with ALL sectors ---
         msg = "📊 **RANKING REPORT (R)**\n`SECTOR        3M_R  6M_R  PRC` \n`------------------------------` \n"
         for _, row in df.iterrows():
             msg += f"`{row['name'].ljust(12)} {str(row['r3']).ljust(5)} {str(row['r6']).ljust(5)} {str(row['prc']).ljust(3)}` \n"
@@ -119,7 +119,13 @@ def run_agent():
         laggard = df.sort_values("prc").iloc[0]
         summary += f"🚫 **AVOID:** {laggard['name']} is underperforming.\n"
 
-        final_msg = msg + summary + "\n*R=Rank, %=Gain vs Nifty. Active sectors synced for Agent 2.*"
+        # Show filtered sectors for Agent 2
+        if active_sectors:
+            summary += f"\n🎯 **SECTORS FOR SCREENING:** {', '.join(active_sectors)}\n"
+        else:
+            summary += f"\n🎯 **SECTORS FOR SCREENING:** None qualify (need 3M & 6M RS > 10%)\n"
+
+        final_msg = msg + summary + "\n*R=Rank, %=Gain vs Nifty. Filtered sectors synced for Agent 2.*"
         
         # Send to Telegram
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
