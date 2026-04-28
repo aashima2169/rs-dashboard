@@ -34,10 +34,11 @@ def get_nifty_constituents(index_name):
 
 def professional_screen(ticker):
     """
-    Advanced Filter: 
-    1. EMA Alignment (Stage 2 Uptrend: Price > E50 > E100)
-    2. Proximity Filter (Price within 5% of 20 EMA)
-    3. VCP Tightness Check (< 0.9 for both tight & trending tightness)
+    Adjusted Filter to catch SCI and NETWEB:
+    1. Loosened Tightness to 0.9 (Trending Tightness)
+    2. EMA 20/50/100 Alignment
+    3. Within 6% of EMA 20 (Catching the pull-back/launch)
+    4. Volume Breakout Exception for aggressive moves
     """
     try:
         df = yf.download(ticker, period="1y", progress=False)
@@ -46,36 +47,40 @@ def professional_screen(ticker):
         
         close = df['Close']
         curr_price = close.iloc[-1]
+        vol_today = df['Volume'].iloc[-1]
+        avg_vol = df['Volume'].rolling(20).mean().iloc[-1]
         
-        # 1. EMA ALIGNMENT (Trend Check)
-        e20 = close.ewm(span=20).mean().iloc[-1]
-        e50 = close.ewm(span=50).mean().iloc[-1]
-        e100 = close.ewm(span=100).mean().iloc[-1]
+        # 1. TREND: Perfect Stage 2 Alignment
+        ema20 = close.ewm(span=20).mean().iloc[-1]
+        ema50 = close.ewm(span=50).mean().iloc[-1]
+        ema100 = close.ewm(span=100).mean().iloc[-1]
         
-        # Must be in a Stage 2 Uptrend
-        if not (curr_price > e50 > e100): 
+        if not (curr_price > ema20 > ema50 > ema100):
             return None
 
-        # 2. PROXIMITY FILTER (Don't buy extended)
-        # Price shouldn't be more than 5% away from the 20 EMA
-        if curr_price > (e20 * 1.05): 
+        # 2. PROXIMITY: Are we too far from the 20 EMA? 
+        # (Caught NETWEB here - it hugs the 20 EMA)
+        if curr_price > (ema20 * 1.06): 
             return None
 
-        # 3. VOLATILITY CONTRACTION (VCP)
-        # Loosening from 0.7 to 0.9 to allow for 'Trending Tightness'
+        # 3. VCP TIGHTNESS (Loosened to 0.9)
         high10, low10 = df['High'].tail(10).max(), df['Low'].tail(10).min()
         high30, low30 = df['High'].iloc[-40:-10].max(), df['Low'].iloc[-40:-10].min()
-        
         tightness = (high10 - low10) / (high30 - low30)
 
-        if tightness < 0.9: 
+        # 4. VOLUME BREAKOUT EXCEPTION
+        # If volume is 150% of avg, we can be more lenient on tightness
+        is_breakout = vol_today > (avg_vol * 1.5)
+
+        if tightness < 0.9 or is_breakout:
             return {
                 "ticker": ticker, 
-                "price": round(curr_price, 2), 
-                "tightness": round(tightness, 2)
+                "price": round(curr_price, 2),
+                "tightness": round(tightness, 2),
+                "type": "Breakout" if is_breakout else "VCP"
             }
         return None
-    except: 
+    except:
         return None
 
 def run_sniper():
@@ -122,7 +127,7 @@ def run_sniper():
                 if result:
                     result["sector"] = sector
                     sector_candidates.append(result)
-                    print(f"  ✅ {ticker}: VCP {result['tightness']}")
+                    print(f"  ✅ {ticker}: {result['type']} - VCP {result['tightness']}")
             
             all_candidates.extend(sector_candidates)
         
@@ -133,11 +138,11 @@ def run_sniper():
         if all_candidates:
             msg = f"🎯 **SNIPER REPORT - VCP SCAN**\n"
             msg += f"`Total Screened: {total_screened} | Qualified: {len(all_candidates)}`\n\n"
-            msg += "`TICKER  SECTOR   PRICE    TIGHT`\n"
-            msg += "`------  -------  -------  -----`\n"
+            msg += "`TICKER  SECTOR   PRICE    TIGHT  TYPE`\n"
+            msg += "`------  -------  -------  -----  --------`\n"
             
             for candidate in all_candidates[:10]:  # Top 10
-                msg += f"`{candidate['ticker'].ljust(7)} {candidate['sector'].ljust(8)} {str(candidate['price']).ljust(7)} {candidate['tightness']}`\n"
+                msg += f"`{candidate['ticker'].ljust(7)} {candidate['sector'].ljust(8)} {str(candidate['price']).ljust(7)} {str(candidate['tightness']).ljust(5)} {candidate['type']}`\n"
             
             if len(all_candidates) > 10:
                 msg += f"\n`... and {len(all_candidates) - 10} more candidates`\n"
