@@ -12,9 +12,7 @@
     "Infra": "^CNXINFRA",
     "CPSE": "CPSEETF.NS"
   },
-  "custom_baskets": {
-    "Railways*": ["IRFC.NS", "RVNL.NS", "IRCON.NS", "RITES.NS"]
-  },
+  "custom_baskets": {},
   "nse_index_mapping": {
     "NiftyIT": "NIFTY IT",
     "BankNifty": "NIFTY BANK",
