@@ -10,9 +10,12 @@
     "Auto": "^CNXAUTO",
     "Realty": "^CNXREALTY",
     "Infra": "^CNXINFRA",
-    "CPSE": "CPSEETF.NS"
+    "CPSE": "CPSEETF.NS",
+    "Defence": "DFNCEETF.NS",
+    "Digital": "NETGTIGER.NS",
+    "Manufacturing": "MAFANG.NS"
   },
-  "custom_baskets": {},
+  "always_scan": ["Defence", "Digital", "Manufacturing"],
   "nse_index_mapping": {
     "NiftyIT": "NIFTY IT",
     "BankNifty": "NIFTY BANK",
@@ -24,6 +27,9 @@
     "PSE": "NIFTY PSE",
     "Power": "NIFTY ENERGY",
     "Infra": "NIFTY INFRA",
-    "CPSE": "NIFTY CPSE"
+    "CPSE": "NIFTY CPSE",
+    "Defence": "NIFTY IND DEFENCE",
+    "Digital": "NIFTY INDIA DIGITAL",
+    "Manufacturing": "NIFTY INDIA MANUFACTURING"
   }
 }
