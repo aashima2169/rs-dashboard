@@ -3,27 +3,17 @@ import requests
 import pandas as pd
 import subprocess
 import sys
-import json  # Added for the hand-off to Agent 2
+import json  # To pass data to Agent 2
 
-# Check for required libraries
-for lib in ["yfinance", "google-generativeai"]:
-    try:
-        __import__(lib.replace("-", "_"))
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", lib])
-
-import yfinance as yf
-import google.generativeai as genai  # Added AI layer
+try:
+    import yfinance as yf
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
+    import yfinance as yf
 
 # 1. SETUP SECRETS
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY") # Ensure this is in your env vars
-
-# Configure Gemini
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
 
 sectors = {
     "Power": "^CNXENERGY", "PSE": "^CNXPSE", "CPSE": "^CNXCPSE",
@@ -39,27 +29,6 @@ def get_safe_close(df):
 def calc_percentile(series):
     current = series.iloc[-1]
     return (series < current).mean() * 100
-
-def get_ai_summary(data_string):
-    """Generates an intelligent summary using Gemini."""
-    if not GEMINI_KEY:
-        return "⚠️ Gemini API Key missing. Skipping AI summary."
-    
-    prompt = f"""
-    Analyze this NSE Sector Relative Strength (RS) data:
-    {data_string}
-    
-    You are a professional trader. In 3 short bullet points:
-    1. Identify the 'Alpha' sector and why it's leading.
-    2. Spot any 'hidden' rotation where 3M velocity is higher than 6M.
-    3. Give a 1-sentence tactical 'Buy/Avoid' advice.
-    Keep it punchy for Telegram.
-    """
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except:
-        return "⚠️ AI Summary failed to generate."
 
 def run_agent():
     try:
@@ -92,38 +61,4 @@ def run_agent():
             rs_r = comb_r['s'] / comb_r['b']
             p3_r = round(((rs_r.iloc[-1] / rs_r.iloc[-63]) - 1) * 100, 1)
             p6_r = round(((rs_r.iloc[-1] / rs_r.iloc[-126]) - 1) * 100, 1)
-            r3_r = round(calc_percentile(rs_r.pct_change(63).tail(252)))
-            r6_r = round(calc_percentile(rs_r.pct_change(126).tail(252)))
-            results.append({"name": "Railways*", "p3": p3_r, "p6": p6_r, "r3": r3_r, "r6": r6_r, "prc": round((r3_r+r6_r)/2)})
-        except: pass
-
-        df = pd.DataFrame(results).sort_values("prc", ascending=False)
-
-        # --- DYNAMIC HAND-OFF (FOR AGENT 2) ---
-        # We save any sector in the top quartile (PRC > 75) for the VCP Sniper to scan.
-        active_sectors = df[df['prc'] >= 75]['name'].tolist()
-        with open('active_sectors.json', 'w') as f:
-            json.dump(active_sectors, f)
-        # --------------------------------------
-
-        # Build Table Message
-        msg = "📊 **RANKING REPORT (R)**\n`SECTOR        3M_R  6M_R  PRC` \n`------------------------------` \n"
-        for _, row in df.iterrows():
-            msg += f"`{row['name'].ljust(12)} {str(row['r3']).ljust(5)} {str(row['r6']).ljust(5)} {str(row['prc']).ljust(3)}` \n"
-
-        # Generate AI Summary
-        raw_summary_data = df[['name', 'p3', 'p6', 'prc']].to_string()
-        ai_summary_text = get_ai_summary(raw_summary_data)
-
-        final_msg = msg + "\n💡 **AI INTELLIGENCE**\n" + ai_summary_text + "\n\n*R=Rank, %=Gain vs Nifty. Active Sectors saved for Sniper Agent.*"
-        
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                      json={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
-        
-        print(f"Successfully sent report. Active sectors: {active_sectors}")
-        
-    except Exception as e:
-        print(f"Error: {e}")
-
-if __name__ == "__main__":
-    run_agent()
+            r3_r = round(calc_percentile(rs_r.pct_change(63).tail(
