@@ -11,9 +11,9 @@
     "Realty": "^CNXREALTY",
     "Infra": "^CNXINFRA",
     "CPSE": "CPSEETF.NS",
-    "Defence": "DFNCEETF.NS",
-    "Digital": "NETGTIGER.NS",
-    "Manufacturing": "MAFANG.NS"
+    "Defence": "HDFCPFDEF.NS",
+    "Digital": "NETGIGETF.NS",
+    "Manufacturing": "MAKEINDIA.NS"
   },
   "always_scan": ["Defence", "Digital", "Manufacturing"],
   "nse_index_mapping": {
