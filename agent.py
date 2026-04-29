@@ -1,37 +1,19 @@
 import os
 import requests
 import pandas as pd
-import subprocess
-import sys
 import json
-
-# Ensure yfinance is installed
-try:
-    import yfinance as yf
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
-    import yfinance as yf
+import yfinance as yf
+import sys
 
 # 1. SETUP SECRETS
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# 2. LOAD CONFIGURATION
-CONFIG_PATH = "config.json"
-
-if not os.path.exists(CONFIG_PATH):
-    print(f"Error: {CONFIG_PATH} not found. Please create it first.")
-    sys.exit(1)
-
-with open(CONFIG_PATH, 'r') as f:
-    config = json.load(f)
-
-sectors = config.get("sectors", {})
-custom_baskets = config.get("custom_baskets", {})
-
 def get_safe_close(df):
     """Handles multi-index columns from yfinance 3.0+"""
-    return df['Adj Close'] if 'Adj Close' in df.columns else df['Close']
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df['Close'].dropna()
 
 def calc_percentile(series):
     """Calculates where the current value stands relative to the last year."""
@@ -42,24 +24,41 @@ def run_agent():
     try:
         print("📊 SCOUT AGENT STARTED...")
         
-        # Benchmark: Nifty 50 - Only 1 year of data needed for 3M & 6M RS
+        if not os.path.exists('config.json'):
+            print("Error: config.json not found.")
+            return
+
+        with open('config.json', 'r') as f:
+            config = json.load(f)
+        
+        sector_map = config.get("sectors", {})
+        
+        # Benchmark: Nifty 50
         bm_raw = yf.download("^NSEI", period="1y", progress=False)
         bm_data = get_safe_close(bm_raw)
+        
         results = []
 
-        # --- A. Process Standard Sectors ---
-        for name, ticker in sectors.items():
+        # --- A. Process Sectors ---
+        for name, identifiers in sector_map.items():
             try:
+                # identifiers[0] is the Yahoo Ticker (e.g., ^CNXMETAL)
+                ticker = identifiers[0]
+                print(f"🔍 Analyzing Sector: {name} ({ticker})")
+                
                 s_raw = yf.download(ticker, period="1y", progress=False)
                 s_data = get_safe_close(s_raw)
+                
+                # Align data
                 combined = pd.concat([s_data, bm_data], axis=1).dropna()
                 combined.columns = ['s', 'b']
                 rs = combined['s'] / combined['b']
                 
-                # Math: Percent Gain vs Percentile Rank
-                # 3M = ~63 trading days, 6M = ~126 trading days
+                # Calculate 3M (63 days) and 6M (126 days) Relative Strength
                 p3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
                 p6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
+                
+                # Percentile Rank (PRC)
                 r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
                 r6 = round(calc_percentile(rs.pct_change(126).tail(252)))
                 
@@ -68,82 +67,38 @@ def run_agent():
                     "r3": r3, "r6": r6, "prc": round((r3+r6)/2)
                 })
             except Exception as e:
-                print(f"Skipping {name} due to error: {e}")
-                continue
+                print(f"⚠️ Skipping {name}: {e}")
 
-        # --- B. Process Custom Baskets (e.g., Railways) ---
-        for basket_name, tickers in custom_baskets.items():
-            try:
-                # Average performance of the tickers in the basket
-                basket_raw = yf.download(tickers, period="1y", progress=False)['Adj Close']
-                basket_idx = basket_raw.mean(axis=1)
-                comb_b = pd.concat([basket_idx, bm_data], axis=1).dropna()
-                comb_b.columns = ['s', 'b']
-                rs_b = comb_b['s'] / comb_b['b']
-                
-                p3_b = round(((rs_b.iloc[-1] / rs_b.iloc[-63]) - 1) * 100, 1)
-                p6_b = round(((rs_b.iloc[-1] / rs_b.iloc[-126]) - 1) * 100, 1)
-                r3_b = round(calc_percentile(rs_b.pct_change(63).tail(252)))
-                r6_b = round(calc_percentile(rs_b.pct_change(126).tail(252)))
-                
-                results.append({
-                    "name": basket_name, "p3": p3_b, "p6": p6_b, 
-                    "r3": r3_b, "r6": r6_b, "prc": round((r3_b+r6_b)/2)
-                })
-            except Exception as e:
-                print(f"Skipping basket {basket_name}: {e}")
-
-        # --- C. Rank Results & Save Hand-off ---
+        # --- B. Rank and Filter ---
         df = pd.DataFrame(results).sort_values("prc", ascending=False)
 
-        # SAVE FOR AGENT 2: Only sectors where BOTH 3M & 6M RS > 10%
-        active_sectors = df[(df['p3'] > 10) & (df['p6'] > 10)]['name'].tolist()
+        # Sniper logic: Only sectors with positive 3M and 6M RS
+        active_sectors = df[(df['p3'] > 0) & (df['p6'] > 0)]['name'].tolist()
+        
+        # Merge with "Always Scan" from config
+        final_scan_list = list(set(active_sectors + config.get("always_scan", [])))
+
         with open('active_sectors.json', 'w') as f:
-            json.dump(active_sectors, f)
+            json.dump(final_scan_list, f)
 
-        # --- D. Build Telegram Message with ALL sectors ---
-        msg = "📊 **SCOUT REPORT - SECTOR RANKINGS**\n\n"
-        msg += "`SECTOR        3M_R  6M_R  PRC` \n"
-        msg += "`------------------------------` \n"
+        # --- C. Telegram Report ---
+        msg = "📊 **SCOUT REPORT - SECTOR RS RANKINGS**\n\n"
+        msg += "`SECTOR         3M_RS  6M_RS  PRC` \n"
+        msg += "`--------------------------------` \n"
         for _, row in df.iterrows():
-            msg += f"`{row['name'].ljust(12)} {str(row['r3']).ljust(5)} {str(row['r6']).ljust(5)} {str(row['prc']).ljust(3)}` \n"
+            msg += f"`{row['name'].ljust(14)} {str(row['p3']).ljust(6)} {str(row['p6']).ljust(6)} {str(row['prc']).ljust(3)}` \n"
 
-        msg += "\n🚀 **VELOCITY REPORT (%)**\n`SECTOR        3M_%   6M_%` \n`---------------------------` \n"
-        for _, row in df.iterrows():
-            msg += f"`{row['name'].ljust(12)} {str(row['p3']).ljust(6)} {str(row['p6']).ljust(6)}` \n"
+        top = df.iloc[0]['name']
+        msg += f"\n💡 **TOP LEAD:** {top}\n"
+        msg += f"🎯 **FOR SNIPER:** {', '.join(final_scan_list)}"
 
-        # Deterministic Strategy Summary
-        top = df.iloc[0]
-        summary = f"\n💡 **STRATEGY SUMMARY**\n✅ **TOP LEAD:** {top['name']} (PRC {top['prc']})\n"
-        
-        improving = df[df['r3'] > (df['r6'] + 15)].head(1)
-        if not improving.empty:
-            summary += f"🔄 **REVERSAL:** {improving.iloc[0]['name']} is gaining momentum.\n"
-        
-        laggard = df.sort_values("prc").iloc[0]
-        summary += f"🚫 **AVOID:** {laggard['name']} is underperforming.\n"
-
-        # Show filtered sectors for Agent 2
-        if active_sectors:
-            summary += f"\n🎯 **SECTORS FOR SNIPER:** {', '.join(active_sectors)}\n"
-            summary += f"✅ **SCOUT AGENT COMPLETED** - Passed {len(active_sectors)} sectors to Sniper"
-        else:
-            summary += f"\n🎯 **SECTORS FOR SNIPER:** None qualify (need 3M & 6M RS > 10%)\n"
-            summary += f"⚠️ **SCOUT AGENT COMPLETED** - No sectors passed filter"
-
-        final_msg = msg + summary
-
-        # Send to Telegram
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                      json={"chat_id": CHAT_ID, "text": final_msg, "parse_mode": "Markdown"})
+                     json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
         
-        print(f"✅ SCOUT AGENT COMPLETED. Active sectors for Sniper: {active_sectors}")
-        
+        print(f"✅ SCOUT COMPLETED. {len(final_scan_list)} sectors passed to Sniper.")
+
     except Exception as e:
-        error_msg = f"❌ **SCOUT AGENT FAILED**\n`Error: {str(e)}`"
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                     json={"chat_id": CHAT_ID, "text": error_msg, "parse_mode": "Markdown"})
-        print(f"Error in run_agent: {e}")
+        print(f"❌ Critical Error: {e}")
 
 if __name__ == "__main__":
     run_agent()
