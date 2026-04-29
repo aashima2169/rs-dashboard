@@ -5,9 +5,9 @@
     "Pharma": "^CNXPHARMA",
     "CPSE": "CPSEETF.NS",
     "Metal": "^CNXMETAL",
-    "Defence": "HAL.NS",
-    "Digital": "BHARTIARTL.NS",
-    "Manufacturing": "M&M.NS"
+    "Defence": "NIFTY_INDIA_DEFENCE.NS",
+    "Digital": "NIFTY_INDIA_DIGITAL.NS",
+    "Manufacturing": "NIFTY_IND_MFG.NS"
   },
   "always_scan": ["Defence", "Digital"],
   "nse_index_mapping": {
@@ -19,12 +19,5 @@
     "Defence": "NIFTY INDIA DEFENCE",
     "Digital": "NIFTY INDIA DIGITAL",
     "Manufacturing": "NIFTY INDIA MANUFACTURING"
-  },
-  "fallback_constituents": {
-    "Defence": ["HAL.NS", "BEL.NS", "MAZDOCK.NS", "COCHINSHIP.NS", "BDL.NS", "BHARATFORG.NS", "GRSE.NS", "DATAPATTNS.NS"],
-    "Digital": ["BHARTIARTL.NS", "TCS.NS", "INFY.NS", "HCLTECH.NS", "ZOMATO.NS", "PBFINTECH.NS", "NYKAA.NS", "NETWEB.NS"],
-    "Manufacturing": ["M&M.NS", "TATASTEEL.NS", "HINDALCO.NS", "MARUTI.NS", "JSWSTEEL.NS", "RELIANCE.NS", "TATAELXSI.NS", "EICHERMOT.NS"],
-    "Power": ["NTPC.NS", "POWERGRID.NS", "TATAPOWER.NS", "ADANIGREEN.NS", "JSWENERGY.NS"],
-    "PSE": ["RECLTD.NS", "PFC.NS", "ONGC.NS", "GAIL.NS", "IOC.NS"]
   }
 }
