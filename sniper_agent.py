@@ -99,11 +99,11 @@ def score_stock(ticker, sector, nifty_df):
 
     score = 0
 
-    # ── RS (0–15)
+    # RS (0–15)
     rs = compute_rs(df, nifty_df)
     score += min(15, max(0, (rs - 0.95) * 40))
 
-    # ── TREND (0–15)
+    # TREND (0–15)
     ema50 = close.ewm(span=50).mean().iloc[-1]
     ema200 = close.ewm(span=200).mean().iloc[-1]
 
@@ -112,66 +112,64 @@ def score_stock(ticker, sector, nifty_df):
     if close.iloc[-1] > ema50:
         score += 7
 
-    # ── STRONG MOVE (0–10)
+    # MOVE (0–10)
     move = (close.iloc[-150:].max() - close.iloc[-150:].min()) / close.iloc[-150:].min()
     score += min(10, move * 10)
 
-    # ── BASE
+    # BASE
     base = close.iloc[-60:]
     base_range = (base.max() - base.min()) / base.max()
 
-    if base_range > 0.22:
+    if base_range > 0.25:
         return None
 
-    # ── TIGHTNESS (0–25)
-    if base_range < 0.08:
-        score += 25
-    elif base_range < 0.12:
+    # TIGHTNESS (0–20)
+    if base_range < 0.10:
         score += 20
-    elif base_range < 0.16:
+    elif base_range < 0.15:
         score += 12
+    elif base_range < 0.20:
+        score += 6
 
-    # ── RECENT TIGHTNESS (CRITICAL)
+    # RIGHT SIDE (RELAXED)
     recent = base.iloc[-15:]
     recent_range = (recent.max() - recent.min()) / recent.max()
 
-    if recent_range > base_range * 0.7:
-        return None
-
-    if recent_range < 0.05:
+    if recent_range < 0.06:
         score += 20
-    elif recent_range < 0.08:
-        score += 15
-    elif recent_range < 0.12:
-        score += 8
+    elif recent_range < 0.10:
+        score += 12
+    elif recent_range < 0.15:
+        score += 5
+    else:
+        score -= 5
 
-    # ── ATR CONTRACTION (NEW CORE FILTER)
+    # ATR CONTRACTION (SCORING, NOT FILTER)
     atr = compute_atr(df)
 
     atr_base = atr.iloc[-60:]
     atr_recent = atr.iloc[-15:]
 
-    if atr_recent.mean() > atr_base.mean() * 0.8:
-        return None  # no volatility contraction
+    ratio = atr_recent.mean() / atr_base.mean()
 
-    # bonus for strong contraction
-    contraction_ratio = atr_recent.mean() / atr_base.mean()
-    if contraction_ratio < 0.6:
+    if ratio < 0.6:
         score += 15
-    elif contraction_ratio < 0.75:
+    elif ratio < 0.8:
         score += 10
-    else:
+    elif ratio < 1.0:
         score += 5
+    else:
+        score -= 5
 
-    # ── EXPANSION FILTER
+    # EXPANSION PENALTY
     last_move = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
     if last_move > 0.15:
-        score -= 15
+        score -= 10
 
-    # ── VOLUME DRY-UP
+    # VOLUME
     vols = volume.iloc[-60:]
     if vols.iloc[30:].mean() < vols.iloc[:30].mean():
-        score += 10
+        score += 8
 
     return {
         "Ticker": ticker,
@@ -186,7 +184,7 @@ def score_stock(ticker, sector, nifty_df):
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (ATR + STRUCTURE MODE)\n")
+    print("\n🎯 VCP SNIPER (BALANCED ATR MODE)\n")
 
     if not os.path.exists("active_sectors.json"):
         print("❌ active_sectors.json missing")
