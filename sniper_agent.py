@@ -1,8 +1,8 @@
 import os
 import json
 import time
-import logging
 import warnings
+import logging
 from collections import defaultdict
 
 import numpy as np
@@ -15,63 +15,55 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING
 # ─────────────────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-logger = logging.getLogger("vcp_sniper")
-
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RELAXED CONFIG
+# CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 CFG = {
-    "use_ema21": False,
-    "min_trend_up_days": 10,
+    # RS filter
+    "rs_threshold": 1.05,  # stock must outperform NIFTY
 
+    # Pole
+    "min_pole_pct": 10,
+    "max_pole_pct": 70,
     "pole_lookback_days": 200,
     "pole_exclude_recent": 5,
     "pole_trough_window": 50,
 
-    "min_pole_pct": 8,
-    "max_pole_pct": 70,
+    # Base
+    "vcp_base_days": 80,
+    "min_base_bars": 25,
 
-    "vcp_base_days": 75,
-    "min_base_bars": 20,
+    # Contraction
+    "min_contraction_ratio": 0.65,
 
-    "min_base_depth_pct": 2,
-    "max_base_depth_pct": 35,
+    # Volume
+    "vol_contraction_ratio": 0.85,
 
-    "min_contraction_ratio": 0.75,
+    # Breakout
+    "near_high_threshold": 0.90,
 
-    "vol_contraction_ratio": 0.95,
-    "breakout_vol_mult": 1.05,
-
-    "near_high_threshold": 0.88,
-
-    "max_results": 20,
-    "sleep_seconds": 0.03,
+    "sleep": 0.03,
 }
 
 FILTERS = [
     "NO_DATA",
-    "F1_EMA_Trend",
-    "F2_Pole_Size",
-    "F3_Base_Formed",
-    "F4_Contraction",
-    "F5a_Base_Depth_Min",
-    "F5b_Base_Depth_Max",
-    "F6_Volume_Dryup",
-    "F7_Near_Breakout",
-    "F8_Breakout_Volume",
+    "RS_FAIL",
+    "F1_TREND",
+    "F2_POLE",
+    "F3_BASE",
+    "F4_SWING",
+    "F5_DEPTH",
+    "F6_VOLUME",
+    "F7_BREAKOUT",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DATA FETCH
+# DATA
 # ─────────────────────────────────────────────────────────────────────────────
-def safe_download(ticker):
+def download(ticker):
     try:
         df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
         if df.empty:
@@ -84,13 +76,13 @@ def safe_download(ticker):
     except:
         return None
 
-def get_stocks(sector_key):
+def get_stocks(sector):
     try:
-        with open("config.json", "r") as f:
-            config = json.load(f)
+        with open("config.json") as f:
+            cfg = json.load(f)
 
-        official_name = config["nse_index_mapping"].get(sector_key)
-        if not official_name:
+        name = cfg["nse_index_mapping"].get(sector)
+        if not name:
             return []
 
         session = requests.Session()
@@ -98,143 +90,158 @@ def get_stocks(sector_key):
 
         session.get("https://www.nseindia.com", headers=headers)
 
-        url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
-        resp = session.get(url, headers=headers)
+        url = f"https://www.nseindia.com/api/equity-stockIndices?index={name.replace(' ', '%20')}"
+        res = session.get(url, headers=headers)
 
-        return [f"{x['symbol']}.NS" for x in resp.json()["data"] if x["symbol"] != official_name]
+        return [f"{x['symbol']}.NS" for x in res.json()["data"] if x["symbol"] != name]
 
     except:
         return []
 
 # ─────────────────────────────────────────────────────────────────────────────
+# RS FILTER
+# ─────────────────────────────────────────────────────────────────────────────
+def compute_rs(stock_df, nifty_df):
+    try:
+        s_ret = stock_df["Close"].pct_change(100).iloc[-1]
+        n_ret = nifty_df["Close"].pct_change(100).iloc[-1]
+        return (1 + s_ret) / (1 + n_ret)
+    except:
+        return 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SWING DETECTION
+# ─────────────────────────────────────────────────────────────────────────────
+def find_swings(series, window=5):
+    highs = []
+    lows = []
+
+    for i in range(window, len(series) - window):
+        chunk = series[i - window:i + window]
+
+        if series[i] == chunk.max():
+            highs.append((i, series[i]))
+
+        if series[i] == chunk.min():
+            lows.append((i, series[i]))
+
+    return highs, lows
+
+# ─────────────────────────────────────────────────────────────────────────────
 # VCP DETECTION
 # ─────────────────────────────────────────────────────────────────────────────
-def detect_vcp(ticker, sector, cfg):
-    df = safe_download(ticker)
+def detect_vcp(ticker, sector, nifty_df):
+    df = download(ticker)
     if df is None or len(df) < 200:
         return None, "NO_DATA"
 
     close = df["Close"]
-    high = df["High"]
-    low = df["Low"]
     volume = df["Volume"]
 
-    cmp = close.iloc[-1]
+    # ── RS FILTER
+    rs = compute_rs(df, nifty_df)
+    if rs < CFG["rs_threshold"]:
+        return None, "RS_FAIL"
 
-    # ── F1 TREND (RELAXED)
-    ema21 = close.ewm(span=21).mean().iloc[-1]
+    # ── TREND
     ema50 = close.ewm(span=50).mean().iloc[-1]
     ema200 = close.ewm(span=200).mean().iloc[-1]
 
-    trend_ok = (ema50 > ema200) or (cmp > ema50)
-    if cfg["use_ema21"]:
-        trend_ok = trend_ok or (ema21 > ema50)
+    if not (ema50 > ema200):
+        return None, "F1_TREND"
 
-    if not trend_ok:
-        return None, "F1_EMA_Trend"
-
-    # ── F2 POLE
-    exclude = cfg["pole_exclude_recent"]
-    search = close.iloc[-(cfg["pole_lookback_days"] + exclude):-exclude]
-
-    if len(search) < 30:
-        return None, "F2_Pole_Size"
-
+    # ── POLE
+    search = close.iloc[-(CFG["pole_lookback_days"] + 5):-5]
     pole_high = search.max()
     pole_idx = search.idxmax()
 
-    trough = close.loc[:pole_idx].tail(cfg["pole_trough_window"])
-    if len(trough) < 10:
-        return None, "F2_Pole_Size"
-
+    trough = close.loc[:pole_idx].tail(CFG["pole_trough_window"])
     pole_low = trough.min()
+
     pole_pct = ((pole_high - pole_low) / pole_low) * 100
 
-    if not (cfg["min_pole_pct"] <= pole_pct <= cfg["max_pole_pct"]):
-        return None, "F2_Pole_Size"
+    if not (CFG["min_pole_pct"] <= pole_pct <= CFG["max_pole_pct"]):
+        return None, "F2_POLE"
 
-    # ── F3 BASE
-    base = close.loc[pole_idx:].tail(cfg["vcp_base_days"])
-    if len(base) < cfg["min_base_bars"]:
-        return None, "F3_Base_Formed"
+    # ── BASE
+    base = close.loc[pole_idx:].tail(CFG["vcp_base_days"])
+    if len(base) < CFG["min_base_bars"]:
+        return None, "F3_BASE"
 
-    base_high = base.max()
+    # ── SWING-BASED CONTRACTION
+    highs, lows = find_swings(base.values)
+
+    if len(lows) < 2:
+        return None, "F4_SWING"
+
+    pullbacks = [l[1] for l in lows]
+
+    # must be higher lows (tightening)
+    if not all(pullbacks[i] < pullbacks[i + 1] for i in range(len(pullbacks) - 1)):
+        return None, "F4_SWING"
+
+    # ── DEPTH
     base_low = base.min()
-
-    # ── F4 CONTRACTION
-    pole_range = pole_high - pole_low
-    base_range = base_high - base_low
-
-    contraction = base_range / pole_range if pole_range > 0 else 999
-
-    if contraction > cfg["min_contraction_ratio"]:
-        return None, "F4_Contraction"
-
-    # ── F5 DEPTH
     depth = ((pole_high - base_low) / pole_high) * 100
 
-    if depth < cfg["min_base_depth_pct"]:
-        return None, "F5a_Base_Depth_Min"
-    if depth > cfg["max_base_depth_pct"]:
-        return None, "F5b_Base_Depth_Max"
+    if depth > 40:
+        return None, "F5_DEPTH"
 
-    # ── F6 VOLUME
-    v1 = volume.tail(20).mean()
-    v2 = volume.tail(90).mean()
+    # ── VOLUME DRY-UP (INSIDE BASE)
+    vols = volume.loc[base.index]
 
-    if v1 / v2 > cfg["vol_contraction_ratio"]:
-        return None, "F6_Volume_Dryup"
+    early = vols.iloc[:len(vols)//2].mean()
+    late = vols.iloc[len(vols)//2:].mean()
 
-    # ── F7 NEAR BREAKOUT
-    if cmp < pole_high * cfg["near_high_threshold"]:
-        return None, "F7_Near_Breakout"
+    if late > CFG["vol_contraction_ratio"] * early:
+        return None, "F6_VOLUME"
 
-    # ── F8 BREAKOUT VOLUME
-    if volume.iloc[-1] < cfg["breakout_vol_mult"] * base.mean():
-        return None, "F8_Breakout_Volume"
+    # ── BREAKOUT PROXIMITY
+    cmp = close.iloc[-1]
+
+    if cmp < pole_high * CFG["near_high_threshold"]:
+        return None, "F7_BREAKOUT"
 
     return {
         "Ticker": ticker,
         "Sector": sector,
-        "CMP": round(cmp, 2),
+        "RS": round(rs, 2),
         "Pole_%": round(pole_pct, 2),
         "Depth_%": round(depth, 2),
-        "Contraction": round(contraction, 2),
         "Pivot": round(pole_high * 1.01, 2),
     }, "PASS"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
-def run_sniper():
-    print("\n🎯 --- VCP SNIPER START ---")
+def run():
+    print("\n🎯 VCP SNIPER (PRO MODE)\n")
 
     if not os.path.exists("active_sectors.json"):
-        print("No sector file found")
         return
 
     with open("active_sectors.json") as f:
         sectors = json.load(f)
 
+    nifty = download("^NSEI")
+
     results = []
     fails = defaultdict(int)
-    total = 0
 
     for sector in sectors:
         tickers = get_stocks(sector)
         print(f"Scanning {sector} ({len(tickers)})")
 
         for t in tickers:
-            total += 1
-            res, reason = detect_vcp(t, sector, CFG)
+            res, reason = detect_vcp(t, sector, nifty)
 
             if res:
                 results.append(res)
-                print(f"✅ {t} | {res['Pole_%']}% | ₹{res['Pivot']}")
+                print(f"✅ {t} | RS {res['RS']} | ₹{res['Pivot']}")
             else:
                 fails[reason] += 1
 
-            time.sleep(CFG["sleep_seconds"])
+            time.sleep(CFG["sleep"])
 
     print("\n📊 FILTER REPORT")
     for k in FILTERS:
@@ -242,9 +249,9 @@ def run_sniper():
 
     if results:
         pd.DataFrame(results).to_csv("sniper_candidates.csv", index=False)
-        print(f"\n✅ Found {len(results)} candidates")
+        print(f"\n✅ Found {len(results)} HIGH QUALITY setups")
     else:
-        print("\n❌ No stocks passed")
+        print("\n❌ No setups found")
 
 if __name__ == "__main__":
-    run_sniper()
+    run()
