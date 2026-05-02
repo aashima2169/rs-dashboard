@@ -83,4 +83,34 @@ def run_sniper():
                 # 2. Dist < 5%: Not overextended from the 21 EMA
                 # 3. Tightness < 1.35: Price is contracting
                 # 4. Volume < 1.1: Volume is not spiking (Dry-up check)
-                if ema10 > ema21 > ema50 and cmp > ema50 and
+                if ema10 > ema21 > ema50 and cmp > ema50 and dist_ema21 < 5.0 and tightness < 1.35 and vdu_ratio < 1.1:
+                    all_data.append({
+                        "Ticker": t, "Sector": sector, "CMP": cmp,
+                        "EMA10": ema10, "EMA21": ema21, "EMA50": ema50,
+                        "VDU": vdu_ratio, "Tightness": tightness,
+                        "Dist_21_%": dist_ema21
+                    })
+            except: continue
+            time.sleep(0.05)
+
+    if all_data:
+        # Sort by VDU (lowest volume dry-up first)
+        all_data = sorted(all_data, key=lambda x: x['VDU'])
+        
+        filename = "sniper_candidates.csv"
+        pd.DataFrame(all_data).to_csv(filename, index=False)
+        send_telegram_file(filename)
+        
+        msg = "🎯 **SNIPER ELITE: EMA + VOLUME**\n"
+        msg += "`TICKER   CMP      VDU    TIGHT` \n"
+        for c in all_data[:12]:
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU']).ljust(6)} {str(c['Tightness']).ljust(5)}` \n"
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                     json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+    else:
+        # Create an empty file to prevent GitHub Action from breaking
+        pd.DataFrame(columns=["Ticker"]).to_csv("sniper_candidates.csv", index=False)
+        print("ℹ️ No matches found today.")
+
+if __name__ == "__main__":
+    run_sniper()
