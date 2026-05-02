@@ -1,6 +1,7 @@
 import os, requests, json, time
 import pandas as pd
 import yfinance as yf
+import numpy as np
 import warnings
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -24,7 +25,7 @@ def get_stocks(sector_key):
     except: return []
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: VOLUME LOGIC FIX ---")
+    print("\n🎯 --- SNIPER MISSION: EMA TREND + SCALABLE METRICS ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
@@ -45,22 +46,25 @@ def run_sniper():
                 volume = df['Volume']
                 cmp = float(close.iloc[-1])
                 
-                # --- RULE 1: THE TREND (EMA 10 > 21 > 50) ---
+                # --- CORE TREND RULES (The only hard filters left) ---
                 ema10 = close.ewm(span=10).mean().iloc[-1]
                 ema21 = close.ewm(span=21).mean().iloc[-1]
                 ema50 = close.ewm(span=50).mean().iloc[-1]
                 
-                if not (ema10 > ema21 > ema50 and cmp > ema50):
-                    continue
+                # We only filter for the basic uptrend you requested
+                if ema10 > ema21 > ema50 and cmp > ema50:
+                    
+                    # --- CALCULATE METRICS (Instead of filtering by them) ---
+                    # 1. Volume Dry-up (VDU): Lower is better
+                    avg_vol_20 = volume.rolling(20).mean().iloc[-1]
+                    curr_vol_3 = volume.tail(3).mean()
+                    vdu_ratio = round(curr_vol_3 / avg_vol_20, 2)
+                    
+                    # 2. Tightness (VCP): Current 10-day volatility vs 40-day volatility
+                    std_10 = close.tail(10).std()
+                    std_40 = close.tail(40).std()
+                    vcp_ratio = round(std_10 / std_40, 2) if std_40 > 0 else 1.0
 
-                # --- RULE 2: VOLUME DRY-UP (VDU) CALCULATION ---
-                avg_vol_20 = volume.rolling(20).mean().iloc[-1]
-                curr_vol_3 = volume.tail(3).mean()
-                vdu_ratio = curr_vol_3 / avg_vol_20
-                
-                # REMOVED HARD FILTER: We allow anything up to 1.1x average volume
-                # This ensures we get a list to look at even in active markets
-                if vdu_ratio <= 1.1: 
                     all_data.append({
                         "Ticker": t,
                         "Sector": sector,
@@ -68,13 +72,14 @@ def run_sniper():
                         "EMA10": round(ema10, 2),
                         "EMA21": round(ema21, 2),
                         "EMA50": round(ema50, 2),
-                        "VDU_Ratio": round(vdu_ratio, 2)
+                        "VDU_Ratio": vdu_ratio,
+                        "VCP_Tightness": vcp_ratio
                     })
             except: continue
             time.sleep(0.05)
 
     if all_data:
-        # Sort by VDU_Ratio (Lowest volume relative to average at the top)
+        # Sort by VDU_Ratio so the "Dry-up" candidates are at the top
         all_data = sorted(all_data, key=lambda x: x['VDU_Ratio'])
         df_results = pd.DataFrame(all_data)
         df_results.to_csv(filename, index=False)
@@ -84,16 +89,18 @@ def run_sniper():
         with open(filename, "rb") as file:
             requests.post(url_doc, data={"chat_id": CHAT_ID}, files={"document": file})
             
-        msg = "🎯 **VCP SNIPER: VOLUME SORTED**\n"
-        msg += "`TICKER   CMP      VDU` \n"
+        msg = f"🎯 **SCAN COMPLETE: {len(all_data)} MATCHES**\n"
+        msg += "List sorted by lowest Volume Dry-up (VDU).\n"
+        msg += "`TICKER   CMP      VDU    TIGHT` \n"
         for c in all_data[:12]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU_Ratio']).ljust(5)}` \n"
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU_Ratio']).ljust(6)} {str(c['VCP_Tightness']).ljust(5)}` \n"
         
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
+        # Always create file for YAML safety
         pd.DataFrame(columns=["Ticker"]).to_csv(filename, index=False)
-        print("ℹ️ Zero matches found.")
+        print("ℹ️ No trending stocks found (EMA 10>21>50 failed).")
 
 if __name__ == "__main__":
     run_sniper()
