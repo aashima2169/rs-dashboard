@@ -5,19 +5,15 @@
     "Pharma": "^CNXPHARMA",
     "CPSE": "CPSEETF.NS",
     "Metal": "^CNXMETAL",
-    "Defence": "NIFTY_INDIA_DEFENCE.NS",
-    "Digital": "NIFTY_INDIA_DIGITAL.NS",
-    "Manufacturing": "NIFTY_IND_MFG.NS"
+    "Digital": "NETGIGETF.NS"
   },
-  "always_scan": ["Defence", "Digital"],
+  "always_scan": ["Digital"],
   "nse_index_mapping": {
     "Power": "NIFTY ENERGY",
     "PSE": "NIFTY PSE",
     "Pharma": "NIFTY PHARMA",
     "CPSE": "NIFTY CPSE",
     "Metal": "NIFTY METAL",
-    "Defence": "NIFTY INDIA DEFENCE",
-    "Digital": "NIFTY INDIA DIGITAL",
-    "Manufacturing": "NIFTY INDIA MANUFACTURING"
+    "Digital": "NIFTY INDIA DIGITAL"
   }
 }
