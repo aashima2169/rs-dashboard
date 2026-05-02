@@ -85,7 +85,7 @@ def score_stock(ticker, sector):
 
     score = 0
 
-    # ── EMA STRUCTURE (HARD FILTER)
+    # ── EMA STRUCTURE (MANDATORY)
     ema21 = close.ewm(span=21).mean()
     ema50 = close.ewm(span=50).mean()
     ema100 = close.ewm(span=100).mean()
@@ -101,10 +101,17 @@ def score_stock(ticker, sector):
     if base_range > 0.35:
         return None
 
-    # ── RIGHT SIDE
+    # ── RIGHT SIDE (LAST 12)
     recent = base.iloc[-12:]
     recent_close = recent["Close"]
 
+    # 🚨 HARD FILTER: TIGHT LAST 6 CANDLES
+    last_6 = close.iloc[-6:]
+    tight_range = (last_6.max() - last_6.min()) / last_6.max()
+    if tight_range > 0.06:
+        return None
+
+    # ── RANGE COMPRESSION SCORE
     recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
 
     if recent_range < 0.04:
@@ -116,7 +123,7 @@ def score_stock(ticker, sector):
     else:
         score -= 20
 
-    # ── SIDEWAYS
+    # ── SIDEWAYS TIGHTNESS
     std_dev = recent_close.pct_change().std()
     if std_dev < 0.01:
         score += 25
@@ -133,7 +140,7 @@ def score_stock(ticker, sector):
     else:
         score -= 15
 
-    # ── RANGE CONTRACTION
+    # ── RANGE CONTRACTION (VCP STRUCTURE)
     seg1 = base_close.iloc[:20]
     seg2 = base_close.iloc[20:40]
     seg3 = base_close.iloc[40:]
@@ -161,14 +168,14 @@ def score_stock(ticker, sector):
     if vols.iloc[30:].mean() < vols.iloc[:30].mean():
         score += 10
 
-    # ── TREND KILLER
-    trend = (recent_close.iloc[-1] - recent_close.iloc[0]) / recent_close.iloc[0]
-    if trend > 0.08:
-        score -= 40
+    # ── REMOVE TREND GRINDERS
+    slope = np.polyfit(range(len(recent_close)), recent_close, 1)[0]
+    if slope > 0:
+        score -= 15
 
-    # ── POST BREAKOUT PENALTY
-    if close.iloc[-1] > recent_close.max() * 1.03:
-        score -= 20
+    # ── STRICT: NO BREAKOUT ALREADY
+    if close.iloc[-1] > recent_close.max() * 1.02:
+        return None
 
     return {
         "Ticker": ticker,
@@ -182,7 +189,7 @@ def score_stock(ticker, sector):
 # MAIN
 # ─────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (FINAL RANKING MODE)\n")
+    print("\n🎯 VCP SNIPER (FINAL MODE)\n")
 
     with open("active_sectors.json") as f:
         sectors = json.load(f)
@@ -193,9 +200,6 @@ def run():
         tickers = get_stocks(sector)
 
         print(f"Scanning {sector} ({len(tickers)})")
-
-        if len(tickers) == 0:
-            print(f"⚠️ No tickers found for {sector}")
 
         for t in tickers:
             res = score_stock(t, sector)
@@ -208,13 +212,14 @@ def run():
 
     df = pd.DataFrame(results)
 
-    # 🚨 ALWAYS CREATE FILE (fix for GitHub Actions)
+    # ✅ ALWAYS CREATE FILE (important for GitHub)
     if df.empty:
         print("\n❌ No candidates")
         df = pd.DataFrame(columns=["Ticker", "Sector", "Score", "Price"])
         df.to_csv("sniper_candidates.csv", index=False)
         return
 
+    # ── CLEAN OUTPUT
     df = df.sort_values("Score", ascending=False)
     df = df.drop_duplicates(subset=["Ticker"])
     df = df.head(CFG["top_n"])
