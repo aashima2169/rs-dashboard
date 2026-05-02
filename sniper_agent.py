@@ -7,7 +7,7 @@ import yfinance as yf
 
 
 # ================================
-# CONFIG (UPDATED)
+# CONFIG
 # ================================
 CONFIG = {
     "pole_lookback_days": 120,
@@ -22,7 +22,7 @@ CONFIG = {
 
 
 # ================================
-# NSE STOCK FETCHER (YOUR LOGIC)
+# NSE STOCK FETCHER
 # ================================
 def get_stocks(sector_key: str) -> list:
     try:
@@ -58,7 +58,7 @@ def get_stocks(sector_key: str) -> list:
 
 
 # ================================
-# VCP DETECTION (DEBUG BASE MODE)
+# VCP DETECTION
 # ================================
 def detect_vcp(ticker, sector, cfg, fails):
     try:
@@ -90,11 +90,23 @@ def detect_vcp(ticker, sector, cfg, fails):
         exclude = cfg["pole_exclude_recent"]
         search = close.iloc[-(cfg["pole_lookback_days"] + exclude):-exclude]
 
+        if len(search) < 20:
+            fails["Pole"] += 1
+            return None
+
         pole_high = search.max()
         idx = search.idxmax()
 
         pre = close.loc[:idx].tail(cfg["pole_trough_window"])
+        if len(pre) == 0:
+            fails["Pole"] += 1
+            return None
+
         pole_low = pre.min()
+
+        if pole_low == 0:
+            fails["Pole"] += 1
+            return None
 
         pole_pct = ((pole_high - pole_low) / pole_low) * 100
 
@@ -117,17 +129,41 @@ def detect_vcp(ticker, sector, cfg, fails):
         pole_range = pole_high - pole_low
         base_range = base_high - base_low
 
+        if pole_range == 0:
+            fails["Pole"] += 1
+            return None
+
         contraction_ratio = base_range / pole_range
 
-        if contraction_ratio > 0.8:
+        # tighter now
+        if contraction_ratio > 0.6:
             fails["Contraction"] += 1
             return None
 
+        # ========================
+        # RIGHT SIDE TIGHTENING
+        # ========================
+        recent = base.tail(10)
+
+        if len(recent) < 5:
+            fails["Tightening"] += 1
+            return None
+
+        range_pct = (recent.max() - recent.min()) / recent.mean()
+
+        if range_pct > 0.08:
+            fails["Tightening"] += 1
+            return None
+
+        # ========================
+        # FINAL OUTPUT
+        # ========================
         return {
             "Ticker": ticker,
             "Sector": sector,
             "Pole_%": round(pole_pct, 1),
             "Contraction": round(contraction_ratio, 2),
+            "TightRange": round(range_pct, 3),
             "Price": round(cmp, 2),
         }
 
@@ -140,7 +176,7 @@ def detect_vcp(ticker, sector, cfg, fails):
 # MAIN
 # ================================
 def run_sniper():
-    print("\n🎯 VCP SNIPER (FINAL DEBUG MODE)\n")
+    print("\n🎯 VCP SNIPER (FINAL)\n")
 
     if not os.path.exists("active_sectors.json"):
         print("❌ active_sectors.json not found")
@@ -155,6 +191,7 @@ def run_sniper():
         "Trend": 0,
         "Pole": 0,
         "Contraction": 0,
+        "Tightening": 0,
         "Base": 0,
         "Data": 0,
         "Error": 0,
@@ -187,14 +224,12 @@ def run_sniper():
     # ========================
     # OUTPUT
     # ========================
-    print("\n🏆 VCP BASE (CONTRACTION) CANDIDATES\n")
+    print("\n🏆 VCP FINAL CANDIDATES\n")
 
     if results:
         df = pd.DataFrame(results).sort_values("Contraction")
         print(df.to_string(index=False))
-
         df.to_csv("sniper_candidates.csv", index=False)
-
     else:
         print("❌ No candidates found")
 
