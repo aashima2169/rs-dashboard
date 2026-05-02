@@ -24,7 +24,7 @@ def get_stocks(sector_key):
     except: return []
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: VOLUME LOGIC RE-SYNC ---")
+    print("\n🎯 --- SNIPER MISSION: VOLUME LOGIC FIX ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
@@ -34,7 +34,7 @@ def run_sniper():
     
     for sector in active_sectors:
         tickers = get_stocks(sector)
-        print(f"📂 Sector [{sector}]: Screening {len(tickers)} tickers...")
+        print(f"📂 Sector [{sector}]: Screening...")
         
         for t in tickers:
             try:
@@ -45,7 +45,7 @@ def run_sniper():
                 volume = df['Volume']
                 cmp = float(close.iloc[-1])
                 
-                # --- STEP 1: EMA STACK (The Foundation) ---
+                # --- RULE 1: THE TREND (EMA 10 > 21 > 50) ---
                 ema10 = close.ewm(span=10).mean().iloc[-1]
                 ema21 = close.ewm(span=21).mean().iloc[-1]
                 ema50 = close.ewm(span=50).mean().iloc[-1]
@@ -53,16 +53,14 @@ def run_sniper():
                 if not (ema10 > ema21 > ema50 and cmp > ema50):
                     continue
 
-                # --- STEP 2: REVISED VOLUME DRY-UP (VDU) ---
-                # Compare recent 3-day average volume to 20-day average
+                # --- RULE 2: VOLUME DRY-UP (VDU) CALCULATION ---
                 avg_vol_20 = volume.rolling(20).mean().iloc[-1]
                 curr_vol_3 = volume.tail(3).mean()
                 vdu_ratio = curr_vol_3 / avg_vol_20
                 
-                # RELAXED VDU: 1.0 means 'average'. 0.9 means '10% below average'.
-                # We use 1.0 to see ALL trending stocks, then sort by the lowest VDU.
-                if vdu_ratio <= 1.05: 
-                    print(f"   ✅ MATCH: {t.ljust(12)} | VDU: {round(vdu_ratio, 2)}")
+                # REMOVED HARD FILTER: We allow anything up to 1.1x average volume
+                # This ensures we get a list to look at even in active markets
+                if vdu_ratio <= 1.1: 
                     all_data.append({
                         "Ticker": t,
                         "Sector": sector,
@@ -76,26 +74,26 @@ def run_sniper():
             time.sleep(0.05)
 
     if all_data:
-        # Sort by best Volume Dry-Up (lowest ratio first)
+        # Sort by VDU_Ratio (Lowest volume relative to average at the top)
         all_data = sorted(all_data, key=lambda x: x['VDU_Ratio'])
+        df_results = pd.DataFrame(all_data)
+        df_results.to_csv(filename, index=False)
         
-        pd.DataFrame(all_data).to_csv(filename, index=False)
-        
-        # Send Document to Telegram
+        # Send File to Telegram
         url_doc = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
         with open(filename, "rb") as file:
             requests.post(url_doc, data={"chat_id": CHAT_ID}, files={"document": file})
             
-        msg = "🎯 **REFINED SNIPER REPORT**\n"
+        msg = "🎯 **VCP SNIPER: VOLUME SORTED**\n"
         msg += "`TICKER   CMP      VDU` \n"
-        for c in all_data[:10]:
+        for c in all_data[:12]:
             msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU_Ratio']).ljust(5)}` \n"
         
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
         pd.DataFrame(columns=["Ticker"]).to_csv(filename, index=False)
-        print("ℹ️ Zero matches found even with relaxed volume logic.")
+        print("ℹ️ Zero matches found.")
 
 if __name__ == "__main__":
     run_sniper()
