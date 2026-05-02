@@ -1,8 +1,10 @@
 import os, requests, json, time
 import pandas as pd
 import yfinance as yf
+import numpy as np
 import warnings
 
+# Suppress warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -24,64 +26,103 @@ def get_stocks(sector_key):
     except: return []
 
 def send_telegram_file(file_path):
-    """Sends the CSV directly to Telegram."""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
         with open(file_path, "rb") as file:
             requests.post(url, data={"chat_id": CHAT_ID}, files={"document": file})
-    except Exception as e:
-        print(f"❌ File Send Error: {e}")
+    except: pass
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: FULL DATA SCAN ---")
+    print("\n🎯 --- SNIPER MISSION: VCP & STAGE 2 LOGIC ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
 
     all_data = [] 
+    
     for sector in active_sectors:
         tickers = get_stocks(sector)
+        print(f"📂 Sector [{sector}]: Screening {len(tickers)} tickers...")
+        
         for t in tickers:
             try:
+                # Need at least 200 days for Stage 2 Trend Check
                 df = yf.download(t, period="1y", progress=False, auto_adjust=True)
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 
-                if df.empty or len(df) < 60: continue
+                if df.empty or len(df) < 200: continue
                 
                 close = df['Close'].dropna()
-                cmp = round(float(close.iloc[-1]), 2)
-                ema10 = round(close.ewm(span=10).mean().iloc[-1], 2)
-                ema20 = round(close.ewm(span=20).mean().iloc[-1], 2)
-                ema50 = round(close.ewm(span=50).mean().iloc[-1], 2)
+                highs = df['High'].dropna()
+                lows = df['Low'].dropna()
+                volume = df['Volume'].dropna()
                 
-                dist_ema20 = round(((cmp - ema20) / ema20) * 100, 2)
-                h10, l10 = df['High'].tail(10).max(), df['Low'].tail(10).min()
-                h30, l30 = df['High'].iloc[-40:-10].max(), df['Low'].iloc[-40:-10].min()
-                tightness = round(float((h10 - l10) / ((h30 - l30) if (h30-l30) != 0 else 1.0)), 2)
+                cmp = float(close.iloc[-1])
+                ema10 = close.ewm(span=10).mean().iloc[-1]
+                ema20 = close.ewm(span=20).mean().iloc[-1]
+                ema50 = close.ewm(span=50).mean().iloc[-1]
+                sma200 = close.rolling(window=200).mean().iloc[-1]
+                
+                # --- 1. STAGE 2 STRUCTURAL FILTER ---
+                # Price must be above 200 SMA, and 200 SMA must be trending up
+                is_stage2 = cmp > sma200 and sma200 > sma200 * 0.98 # Not declining
+                # Standard Trend Stack
+                is_trending = cmp > ema10 > ema20 > ema50
+                
+                if not (is_stage2 and is_trending):
+                    continue
 
-                # Criteria: Stacked EMAs + Tightness < 1.35
-                if cmp > ema10 > ema20 > ema50 and dist_ema20 < 5.0 and tightness < 1.35:
+                # --- 2. VOLATILITY CONTRACTION (VCP) ---
+                # Measure the standard deviation of returns (Volatility)
+                # We want current volatility (last 10 days) to be < 60% of recent volatility (last 40 days)
+                vol_current = close.tail(10).std()
+                vol_recent = close.iloc[-40:].std()
+                vcp_ratio = round(vol_current / vol_recent, 2) if vol_recent > 0 else 1.0
+                
+                # --- 3. VOLUME DRY-UP (VDU) ---
+                # Volume of last 3 days should be lower than 20-day average volume
+                avg_vol_20 = volume.rolling(20).mean().iloc[-1]
+                curr_vol_3 = volume.tail(3).mean()
+                vdu_ratio = round(curr_vol_3 / avg_vol_20, 2)
+                
+                # --- 4. HIGH TIGHT FLAG (HTF) CHECK ---
+                # Has the stock gained > 25% in the last 3 months? (The 'Flagpole')
+                three_month_ago_price = close.iloc[-65] # approx 65 trading days
+                three_month_gain = (cmp - three_month_ago_price) / three_month_ago_price
+                
+                # --- FINAL ELITE LOGIC ---
+                # 1. Must be Stage 2
+                # 2. Volatility must be contracting (vcp_ratio < 0.7)
+                # 3. Volume must be drying up (vdu_ratio < 0.9)
+                if vcp_ratio < 0.7 and vdu_ratio < 0.9:
+                    print(f"   💎 ELITE VCP: {t.ljust(12)} | VCP: {vcp_ratio} | VDU: {vdu_ratio}")
                     all_data.append({
-                        "Ticker": t, "Sector": sector, "CMP": cmp,
-                        "EMA10": ema10, "EMA20": ema20, "EMA50": ema50,
-                        "Dist_EMA20_%": dist_ema20, "Tightness": tightness
+                        "Ticker": t,
+                        "Sector": sector,
+                        "CMP": round(cmp, 2),
+                        "VCP_Ratio": vcp_ratio,
+                        "VDU_Ratio": vdu_ratio,
+                        "3M_Gain_%": round(three_month_gain * 100, 2),
+                        "Dist_EMA20_%": round(((cmp - ema20)/ema20)*100, 2),
+                        "Signal": "HIGH TIGHT FLAG" if three_month_gain > 0.3 else "VCP SETUP"
                     })
-            except: continue
+            except Exception as e: continue
             time.sleep(0.1)
 
     if all_data:
-        filename = "sniper_candidates.csv"
+        filename = "sniper_elite_vcp.csv"
         pd.DataFrame(all_data).to_csv(filename, index=False)
         send_telegram_file(filename)
         
-        msg = "🎯 **SNIPER ELITE REPORT**\n`TICKER   CMP      E10    E20    E50` \n"
+        msg = "🎯 **SNIPER VCP & VDU REPORT**\n"
+        msg += "`TICKER   CMP      VCP    VDU    3M%` \n"
         for c in all_data[:10]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['EMA10']).ljust(6)} {str(c['EMA20']).ljust(6)} {str(c['EMA50']).ljust(6)}` \n"
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VCP_Ratio']).ljust(6)} {str(c['VDU_Ratio']).ljust(6)} {str(c['3M_Gain_%']).ljust(5)}%` \n"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
-        print("ℹ️ No matches today.")
+        print("ℹ️ No structural VCP setups found today.")
 
 if __name__ == "__main__":
     run_sniper()
