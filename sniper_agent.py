@@ -33,8 +33,8 @@ CFG = {
     "vcp_base_days": 80,
     "min_base_bars": 18,
 
-    "vol_contraction_ratio": 0.85,
-    "near_high_threshold": 0.87,
+    "vol_contraction_ratio": 0.9,
+    "near_high_threshold": 0.85,
 
     "sleep": 0.03,
 }
@@ -150,9 +150,8 @@ def check_vcp_contraction(base):
         return False
 
     improving = 0
-
     for i in range(len(contractions) - 1):
-        if contractions[i + 1] <= contractions[i] * 1.1:
+        if contractions[i + 1] <= contractions[i] * 1.2:
             improving += 1
 
     return improving >= len(contractions) // 2
@@ -208,7 +207,7 @@ def detect_vcp(ticker, sector, nifty_df):
     if not check_vcp_contraction(base):
         return None, "F4_SWING"
 
-    # RANGE COMPRESSION (RELAXED)
+    # RANGE COMPRESSION (VERY RELAXED)
     segments = np.array_split(base, 3)
     ranges = []
 
@@ -218,17 +217,17 @@ def detect_vcp(ticker, sector, nifty_df):
         r = (seg.max() - seg.min()) / seg.max()
         ranges.append(r)
 
-    if not (ranges[2] < ranges[0] * 0.8):
+    if not (ranges[2] < ranges[0] * 0.9):
         return None, "F4_SWING"
 
     # DEPTH
     base_low = base.min()
     depth = ((pole_high - base_low) / pole_high) * 100
 
-    if depth > 40:
+    if depth > 45:
         return None, "F5_DEPTH"
 
-    # VOLUME DRY-UP
+    # VOLUME DRY-UP (RELAXED)
     vols = volume.loc[base.index]
 
     early = vols.iloc[:len(vols)//2].mean()
