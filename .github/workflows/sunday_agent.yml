@@ -2,10 +2,8 @@ name: Multi-Agent Trading System
 
 on:
   schedule:
-    # Runs Monday-Friday at 10:30 UTC (4:00 PM IST)
-    - cron: '30 10 * * 1-5'
-    # Sunday run at 8:00 PM IST
-    - cron: '30 14 * * 0'
+    - cron: '30 10 * * 1-5' # 4:00 PM IST
+    - cron: '30 14 * * 0'    # 8:00 PM IST Sunday
   workflow_dispatch: 
 
 jobs:
@@ -30,8 +28,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # 1. Run Scout first to generate active_sectors.json
+          # Step 1: Scout analyzes sectors and saves active_sectors.json
           python agent.py
           
-          # 2. Run Sniper second to scan stocks in those sectors
+          # Step 2: Sniper reads that file and scans stocks
           python sniper_agent.py
