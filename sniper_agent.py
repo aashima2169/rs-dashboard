@@ -6,25 +6,34 @@ from collections import defaultdict
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
+# ─────────────────────────────────────────────
+# CONFIG (RELAXED FOR REAL MARKET)
+# ─────────────────────────────────────────────
 CFG = {
     "min_pole_pct": 15,
     "max_pole_pct": 45,
     "pole_trough_window": 30,
     "pole_lookback_days": 130,
     "pole_exclude_recent": 20,
+
     "vcp_base_days": 60,
     "min_base_bars": 18,
+
     "min_base_depth_pct": 5,
-    "max_base_depth_pct": 22,
-    "base_tightening_ratio": 0.65,
-    "vol_contraction_ratio": 0.85,
-    "near_high_threshold": 0.88,
-    "min_contraction_ratio": 0.60,
+    "max_base_depth_pct": 25,
+
+    "base_tightening_ratio": 0.75,
+    "vol_contraction_ratio": 0.95,
+
+    "near_high_threshold": 0.85,
+    "min_contraction_ratio": 0.75,
 }
+
+DEBUG_STOCK = False   # 🔥 Turn True if you want per-stock logs
 
 
 # ─────────────────────────────────────────────
-# NSE STOCK FETCH (FIXED)
+# NSE STOCK FETCH
 # ─────────────────────────────────────────────
 def get_stocks(sector_key: str) -> list:
     try:
@@ -58,7 +67,6 @@ def get_stocks(sector_key: str) -> list:
             if not symbol:
                 continue
 
-            # 🔥 critical fix → remove index rows
             if symbol.upper().startswith("NIFTY"):
                 continue
 
@@ -79,6 +87,7 @@ def detect_vcp(ticker, sector, cfg, fails):
         df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
 
         if df.empty or len(df) < 250:
+            fails["Data"] += 1
             return None
 
         if isinstance(df.columns, pd.MultiIndex):
@@ -97,7 +106,8 @@ def detect_vcp(ticker, sector, cfg, fails):
         ema200 = float(close.ewm(span=200).mean().iloc[-1])
 
         if not ((ema21 > ema50 > ema200) and (cmp > ema50)):
-            fails["EMA Trend"] += 1
+            fails["Trend"] += 1
+            if DEBUG_STOCK: print(f"{ticker} ❌ Trend")
             return None
 
         # ── POLE ──
@@ -113,12 +123,14 @@ def detect_vcp(ticker, sector, cfg, fails):
         pole_pct = ((pole_high - pole_low) / pole_low) * 100
         if not (cfg["min_pole_pct"] <= pole_pct <= cfg["max_pole_pct"]):
             fails["Pole"] += 1
+            if DEBUG_STOCK: print(f"{ticker} ❌ Pole")
             return None
 
         # ── BASE ──
         base = close.loc[idx:].tail(cfg["vcp_base_days"])
         if len(base) < cfg["min_base_bars"]:
             fails["Base"] += 1
+            if DEBUG_STOCK: print(f"{ticker} ❌ Base")
             return None
 
         base_high = base.max()
@@ -129,40 +141,44 @@ def detect_vcp(ticker, sector, cfg, fails):
 
         if base_range / pole_range > cfg["min_contraction_ratio"]:
             fails["Contraction"] += 1
+            if DEBUG_STOCK: print(f"{ticker} ❌ Contraction")
             return None
 
-        # ── BASE TIGHTENING ──
+        # ── TIGHTENING ──
         mid = len(base)//2
         r1 = base.iloc[:mid].max() - base.iloc[:mid].min()
         r2 = base.iloc[mid:].max() - base.iloc[mid:].min()
 
         if r1 == 0 or (r2/r1) > cfg["base_tightening_ratio"]:
             fails["Tightening"] += 1
+            if DEBUG_STOCK: print(f"{ticker} ❌ Tightening")
             return None
 
-        # ── ATR CONTRACTION ──
+        # ── ATR ──
         tr = high - low
         atr = tr.rolling(14).mean()
 
-        if (atr.iloc[-5:].mean() / atr.iloc[-30:-10].mean()) > 0.75:
+        if (atr.iloc[-5:].mean() / atr.iloc[-30:-10].mean()) > 0.9:
             fails["ATR"] += 1
+            if DEBUG_STOCK: print(f"{ticker} ❌ ATR")
             return None
 
-        # ── CANDLE COMPRESSION ──
+        # ── CANDLE ──
         if ((high.tail(5) - low.tail(5)).mean() /
-            (high.tail(30) - low.tail(30)).mean()) > 0.6:
+            (high.tail(30) - low.tail(30)).mean()) > 0.75:
             fails["Candle"] += 1
+            if DEBUG_STOCK: print(f"{ticker} ❌ Candle")
             return None
 
         # ── DEPTH ──
         depth = ((pole_high - base_low) / pole_high) * 100
 
         if depth < cfg["min_base_depth_pct"]:
-            fails["Depth Min"] += 1
+            fails["DepthMin"] += 1
             return None
 
         if depth > cfg["max_base_depth_pct"]:
-            fails["Depth Max"] += 1
+            fails["DepthMax"] += 1
             return None
 
         # ── VOLUME ──
@@ -170,7 +186,7 @@ def detect_vcp(ticker, sector, cfg, fails):
             fails["Volume"] += 1
             return None
 
-        # ── NEAR BREAKOUT ──
+        # ── BREAKOUT ZONE ──
         if cmp < pole_high * cfg["near_high_threshold"]:
             fails["Breakout"] += 1
             return None
@@ -183,15 +199,15 @@ def detect_vcp(ticker, sector, cfg, fails):
         }
 
     except Exception as e:
-        print(f"Error {ticker}: {e}")
+        fails["Error"] += 1
         return None
 
 
 # ─────────────────────────────────────────────
-# MAIN RUNNER
+# MAIN
 # ─────────────────────────────────────────────
 def run_sniper():
-    print("\n🎯 VCP SNIPER (FINAL)\n")
+    print("\n🎯 VCP SNIPER (DEBUG MODE)\n")
 
     if not os.path.exists("active_sectors.json"):
         print("❌ active_sectors.json missing")
@@ -222,23 +238,22 @@ def run_sniper():
 
     df = pd.DataFrame(results)
 
-    # ✅ SAFE GUARD
     if df.empty:
         print("\n❌ No VCP candidates found\n")
-        df.to_csv("sniper_candidates.csv", index=False)
-        return
-
-    df = df.sort_values("Score", ascending=False)
-
-    print("\n🏆 TOP VCP-LIKE CANDIDATES\n")
-    print(df)
+    else:
+        df = df.sort_values("Score", ascending=False)
+        print("\n🏆 TOP VCP CANDIDATES\n")
+        print(df)
 
     df.to_csv("sniper_candidates.csv", index=False)
 
-    # OPTIONAL DEBUG
-    print("\n📊 FILTER FAIL COUNTS\n")
-    for k, v in fails.items():
-        print(f"{k}: {v}")
+    # 🔥 DEBUG OUTPUT
+    print("\n📊 FILTER FAILURE BREAKDOWN\n")
+    total = sum(fails.values())
+
+    for k, v in sorted(fails.items(), key=lambda x: -x[1]):
+        pct = round((v / total) * 100, 1) if total else 0
+        print(f"{k:<15} : {v} ({pct}%)")
 
 
 if __name__ == "__main__":
