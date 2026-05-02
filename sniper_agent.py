@@ -5,25 +5,14 @@ import requests
 import pandas as pd
 import yfinance as yf
 
-
-# ================================
+# ==============================
 # CONFIG
-# ================================
-CONFIG = {
-    "pole_lookback_days": 120,
-    "pole_exclude_recent": 10,
-    "pole_trough_window": 30,
-    "min_pole_pct": 18,
-    "max_pole_pct": 150,
+# ==============================
+DEBUG = True
 
-    "vcp_base_days": 30,
-    "min_base_bars": 15,
-}
-
-
-# ================================
-# NSE STOCK FETCHER (FIXED)
-# ================================
+# ==============================
+# NSE STOCK FETCH
+# ==============================
 def get_stocks(sector_key: str) -> list:
     try:
         with open("config.json", "r") as f:
@@ -47,22 +36,7 @@ def get_stocks(sector_key: str) -> list:
 
         if resp.status_code == 200:
             data = resp.json().get("data", [])
-
-            stocks = []
-            for s in data:
-                sym = s.get("symbol", "")
-
-                # 🔥 REMOVE JUNK SYMBOLS
-                if not sym:
-                    continue
-                if "NIFTY" in sym.upper():
-                    continue
-                if sym.endswith("-"):
-                    continue
-
-                stocks.append(f"{sym}.NS")
-
-            return list(set(stocks))
+            return [f"{s['symbol']}.NS" for s in data if "symbol" in s]
 
         print(f"❌ NSE API error {resp.status_code} for {sector_key}")
         return []
@@ -71,145 +45,117 @@ def get_stocks(sector_key: str) -> list:
         print(f"❌ NSE Error ({sector_key}): {e}")
         return []
 
+# ==============================
+# SAFE CLOSE
+# ==============================
+def get_close(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df["Close"].dropna()
 
-# ================================
-# VCP DETECTION
-# ================================
-def detect_vcp(ticker, sector, cfg, fails):
+# ==============================
+# FILTER TRACKING
+# ==============================
+filter_fails = {
+    "Trend": 0,
+    "Pole": 0,
+    "Contraction": 0,
+    "Tightening": 0,
+    "Base": 0,
+    "Data": 0,
+    "Error": 0,
+}
+
+# ==============================
+# CORE LOGIC
+# ==============================
+def evaluate_stock(ticker, sector):
     try:
-        df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
+        df = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
 
-        if df.empty or len(df) < 250:
-            fails["Data"] += 1
+        if df.empty or len(df) < 200:
+            filter_fails["Data"] += 1
             return None
 
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+        close = get_close(df)
 
-        close = df["Close"]
+        # FIX: remove warning
+        cmp = float(close.iloc[-1])
 
-        # ✅ FIXED WARNING
-        cmp = float(close.iloc[-1].item())
+        # =========================
+        # TREND FILTER
+        # =========================
+        ema21 = close.ewm(span=21).mean().iloc[-1]
+        ema50 = close.ewm(span=50).mean().iloc[-1]
+        ema200 = close.ewm(span=200).mean().iloc[-1]
 
-        # ========================
-        # TREND (RELAXED)
-        # ========================
-        ema21 = float(close.ewm(span=21).mean().iloc[-1])
-        ema50 = float(close.ewm(span=50).mean().iloc[-1])
-
-        if not ((ema21 > ema50) and (cmp > ema50)):
-            fails["Trend"] += 1
+        if not (ema21 > ema50 > ema200 and cmp > ema50):
+            filter_fails["Trend"] += 1
             return None
 
-        # ========================
-        # POLE
-        # ========================
-        exclude = cfg["pole_exclude_recent"]
-        search = close.iloc[-(cfg["pole_lookback_days"] + exclude):-exclude]
+        # =========================
+        # POLE DETECTION
+        # =========================
+        moves = [
+            ((cmp - close.iloc[-10]) / close.iloc[-10]) * 100,
+            ((cmp - close.iloc[-20]) / close.iloc[-20]) * 100,
+            ((cmp - close.iloc[-30]) / close.iloc[-30]) * 100,
+            ((cmp - close.iloc[-40]) / close.iloc[-40]) * 100,
+        ]
 
-        if len(search) < 20:
-            fails["Pole"] += 1
+        best_pole = max(moves)
+
+        if best_pole < 20:
+            filter_fails["Pole"] += 1
             return None
 
-        pole_high = search.max()
-        idx = search.idxmax()
+        # =========================
+        # CONTRACTION
+        # =========================
+        recent = close.tail(20)
+        contraction_ratio = recent.std() / recent.mean()
 
-        pre = close.loc[:idx].tail(cfg["pole_trough_window"])
-        if len(pre) == 0:
-            fails["Pole"] += 1
+        if contraction_ratio > 0.5:
+            filter_fails["Contraction"] += 1
             return None
 
-        pole_low = pre.min()
-
-        if pole_low == 0:
-            fails["Pole"] += 1
-            return None
-
-        pole_pct = ((pole_high - pole_low) / pole_low) * 100
-
-        if not (cfg["min_pole_pct"] <= pole_pct <= cfg["max_pole_pct"]):
-            fails["Pole"] += 1
-            return None
-
-        # ========================
-        # BASE / CONTRACTION
-        # ========================
-        base = close.loc[idx:].tail(cfg["vcp_base_days"])
-
-        if len(base) < cfg["min_base_bars"]:
-            fails["Base"] += 1
-            return None
-
-        base_high = base.max()
-        base_low = base.min()
-
-        pole_range = pole_high - pole_low
-        base_range = base_high - base_low
-
-        if pole_range == 0:
-            fails["Pole"] += 1
-            return None
-
-        contraction_ratio = base_range / pole_range
-
-        if contraction_ratio > 0.45:
-            fails["Contraction"] += 1
-            return None
-
-        # ========================
-        # TIGHTENING (FIXED 🔥)
-        # ========================
-        recent = base.tail(10)
-
-        if len(recent) < 5:
-            fails["Tightening"] += 1
-            return None
-
-        highs = recent.rolling(3).max()
-        lows = recent.rolling(3).min()
-
-        # contraction in ranges
-        range_now = highs.iloc[-1] - lows.iloc[-1]
-        range_prev = highs.iloc[-4] - lows.iloc[-4]
-
-        if range_now > range_prev:
-            fails["Tightening"] += 1
-            return None
-
-        # higher lows
-        if recent.iloc[-1] < recent.iloc[-3]:
-            fails["Tightening"] += 1
-            return None
-
-        # volatility compression
+        # =========================
+        # TIGHTENING
+        # =========================
         range_pct = (recent.max() - recent.min()) / recent.mean()
 
-        if range_pct > 0.055:
-            fails["Tightening"] += 1
+        if range_pct > 0.06:
+            filter_fails["Tightening"] += 1
             return None
 
-        # ========================
-        # FINAL OUTPUT
-        # ========================
+        # =========================
+        # BASE (FIXED LOGIC)
+        # =========================
+        base_high = close.tail(30).max()
+
+        # price must be near highs (NOT lows)
+        if cmp < base_high * 0.90:
+            filter_fails["Base"] += 1
+            return None
+
         return {
             "Ticker": ticker,
             "Sector": sector,
-            "Pole_%": round(pole_pct, 1),
+            "Pole_%": round(best_pole, 1),
             "Contraction": round(contraction_ratio, 2),
             "TightRange": round(range_pct, 3),
             "Price": round(cmp, 2),
         }
 
-    except Exception:
-        fails["Error"] += 1
+    except Exception as e:
+        filter_fails["Error"] += 1
         return None
 
-
-# ================================
+# ==============================
 # MAIN
-# ================================
+# ==============================
 def run_sniper():
-    print("\n🎯 VCP SNIPER (FINAL)\n")
+    print("\n🎯 VCP SNIPER (FINAL)")
 
     if not os.path.exists("active_sectors.json"):
         print("❌ active_sectors.json not found")
@@ -220,65 +166,43 @@ def run_sniper():
 
     results = []
 
-    fails = {
-        "Trend": 0,
-        "Pole": 0,
-        "Contraction": 0,
-        "Tightening": 0,
-        "Base": 0,
-        "Data": 0,
-        "Error": 0,
-    }
-
     for sector in active_sectors:
-        tickers = get_stocks(sector)
-        print(f"Scanning {sector} ({len(tickers)})")
+        stocks = get_stocks(sector)
+        print(f"Scanning {sector} ({len(stocks)})")
 
-        for t in tickers:
-            res = detect_vcp(t, sector, CONFIG, fails)
+        for stock in stocks:
+            res = evaluate_stock(stock, sector)
             if res:
                 results.append(res)
-
             time.sleep(0.05)
 
-    # ========================
-    # REMOVE DUPLICATES
-    # ========================
-    seen = set()
-    unique_results = []
+    df = pd.DataFrame(results)
 
-    for r in results:
-        if r["Ticker"] not in seen:
-            unique_results.append(r)
-            seen.add(r["Ticker"])
+    print("\n🏆 VCP FINAL CANDIDATES")
 
-    results = unique_results
-
-    # ========================
-    # OUTPUT
-    # ========================
-    print("\n🏆 VCP FINAL CANDIDATES\n")
-
-    if results:
-        df = pd.DataFrame(results).sort_values("Contraction")
-        print(df.to_string(index=False))
-        df.to_csv("sniper_candidates.csv", index=False)
-    else:
+    if df.empty:
         print("❌ No candidates found")
-        pd.DataFrame(columns=["Ticker","Sector","Pole_%","Contraction","TightRange","Price"])\
-            .to_csv("sniper_candidates.csv", index=False)
+    else:
+        df = df.sort_values("Pole_%", ascending=False)
+        print(df.to_string(index=False))
 
-    # ========================
-    # DEBUG
-    # ========================
-    total = sum(fails.values())
+    # =========================
+    # DEBUG OUTPUT
+    # =========================
+    total = sum(filter_fails.values())
 
-    print("\n📊 FILTER FAILURE BREAKDOWN\n")
-    for k, v in fails.items():
+    print("\n📊 FILTER FAILURE BREAKDOWN")
+    for k, v in filter_fails.items():
         pct = (v / total * 100) if total > 0 else 0
         print(f"{k:<12}: {v} ({pct:.1f}%)")
 
+    # =========================
+    # SAVE FILE
+    # =========================
+    df.to_csv("sniper_candidates.csv", index=False)
 
-# ================================
+# ==============================
+# RUN
+# ==============================
 if __name__ == "__main__":
     run_sniper()
