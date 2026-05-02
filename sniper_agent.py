@@ -5,7 +5,9 @@ import numpy as np
 # =========================
 # CONFIG
 # =========================
-TICKERS = []  # <-- your ticker list here
+TICKERS = []  # <-- your ticker list
+
+MIN_SCORE = 20   # ↓ reduced (important fix)
 
 # =========================
 # HELPERS
@@ -20,14 +22,12 @@ def compute_atr(df, period=14):
     tr3 = (low - close.shift()).abs()
 
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(period).mean()
-    return atr
+    return tr.rolling(period).mean()
 
 
 def compute_structure_score(base_close, recent_close):
     score = 0
 
-    # Split into contraction legs
     seg1 = base_close.iloc[:20]
     seg2 = base_close.iloc[20:40]
     seg3 = base_close.iloc[40:]
@@ -36,33 +36,31 @@ def compute_structure_score(base_close, recent_close):
     r2 = (seg2.max() - seg2.min()) / seg2.max()
     r3 = (seg3.max() - seg3.min()) / seg3.max()
 
-    # Multi-leg contraction
+    # contraction
     if r3 < r2 < r1:
-        score += 40
+        score += 30
     elif r3 < r2:
-        score += 20
+        score += 15
 
-    # Tight right side
+    # right-side tightness (relaxed)
     recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
 
-    if recent_range < 0.04:
-        score += 40
-    elif recent_range < 0.08:
-        score += 25
-    elif recent_range < 0.12:
+    if recent_range < 0.05:
+        score += 30
+    elif recent_range < 0.10:
+        score += 20
+    elif recent_range < 0.15:
         score += 10
     else:
-        score -= 30
+        score -= 10
 
-    # Sideways behavior (very important)
+    # sideways
     std_dev = recent_close.pct_change().std()
 
-    if std_dev < 0.01:
-        score += 30
-    elif std_dev < 0.015:
-        score += 15
-    else:
-        score -= 20
+    if std_dev < 0.012:
+        score += 20
+    elif std_dev < 0.02:
+        score += 10
 
     return score
 
@@ -76,7 +74,7 @@ def is_valid_trend(df):
 
 
 # =========================
-# MAIN SCANNER
+# MAIN
 # =========================
 results = []
 
@@ -87,12 +85,11 @@ for ticker in TICKERS:
         if len(df) < 70:
             continue
 
-        close = df["Close"]
-        volume = df["Volume"]
-
-        # EMA TREND FILTER (mandatory)
         if not is_valid_trend(df):
             continue
+
+        close = df["Close"]
+        volume = df["Volume"]
 
         base = df.iloc[-60:]
         recent = base.iloc[-12:]
@@ -101,61 +98,59 @@ for ticker in TICKERS:
         recent_close = recent["Close"]
 
         # =========================
-        # STRUCTURE SCORE
+        # STRUCTURE
         # =========================
         structure_score = compute_structure_score(base_close, recent_close)
 
         # =========================
-        # QUALITY SCORE
+        # QUALITY
         # =========================
         quality_score = 0
 
-        # Candle compression
+        # candle compression
         bodies = (recent["Close"] - recent["Open"]).abs()
         ranges = (recent["High"] - recent["Low"])
         body_ratio = (bodies / ranges).mean()
 
-        if body_ratio < 0.4:
-            quality_score += 20
-        elif body_ratio < 0.6:
-            quality_score += 10
-        else:
-            quality_score -= 10
+        if body_ratio < 0.5:
+            quality_score += 15
+        elif body_ratio < 0.7:
+            quality_score += 5
 
-        # ATR contraction
+        # ATR contraction (relaxed)
         atr = compute_atr(df)
         atr_ratio = atr.iloc[-12:].mean() / atr.iloc[-60:].mean()
 
-        if atr_ratio < 0.7:
-            quality_score += 20
-        elif atr_ratio < 0.9:
-            quality_score += 10
+        if atr_ratio < 0.8:
+            quality_score += 15
+        elif atr_ratio < 1.0:
+            quality_score += 5
 
-        # Volume contraction
+        # volume contraction
         vols = volume.iloc[-60:]
         if vols.iloc[30:].mean() < vols.iloc[:30].mean():
             quality_score += 10
 
         # =========================
-        # TREND PENALTY (kill runners)
+        # TREND PENALTY (reduced)
         # =========================
         trend = (close.iloc[-1] - close.iloc[-12]) / close.iloc[-12]
 
-        if trend > 0.06:
-            quality_score -= 60
+        if trend > 0.10:
+            quality_score -= 20
 
         # =========================
-        # BREAKOUT FILTER (already moved stocks)
+        # BREAKOUT CHECK (soft, not kill)
         # =========================
-        if close.iloc[-1] > recent_close.max() * 1.025:
-            quality_score -= 30
+        if close.iloc[-1] > recent_close.max() * 1.03:
+            quality_score -= 10
 
         # =========================
-        # FINAL SCORE (structure dominates)
+        # FINAL SCORE
         # =========================
         score = structure_score * 2 + quality_score
 
-        if score > 30:
+        if score >= MIN_SCORE:
             results.append({
                 "Ticker": ticker,
                 "Score": round(score, 2),
