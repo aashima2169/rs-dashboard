@@ -101,14 +101,26 @@ def score_stock(ticker, sector):
     if base_range > 0.35:
         return None
 
-    # ── RIGHT SIDE (LAST 12)
+    # ── RIGHT SIDE
     recent = base.iloc[-12:]
     recent_close = recent["Close"]
 
-    # 🚨 HARD FILTER: TIGHT LAST 6 CANDLES
+    # 🚨 HARD FILTER: tight last candles
     last_6 = close.iloc[-6:]
     tight_range = (last_6.max() - last_6.min()) / last_6.max()
     if tight_range > 0.06:
+        return None
+
+    # 🚨 NEW: Reject expansion candles
+    last = df.iloc[-1]
+    avg_range = (df["High"] - df["Low"]).iloc[-20:-1].mean()
+    last_range = last["High"] - last["Low"]
+
+    if last_range > 1.8 * avg_range:
+        return None
+
+    body = abs(last["Close"] - last["Open"])
+    if body > 1.5 * avg_range:
         return None
 
     # ── RANGE COMPRESSION SCORE
@@ -140,7 +152,7 @@ def score_stock(ticker, sector):
     else:
         score -= 15
 
-    # ── RANGE CONTRACTION (VCP STRUCTURE)
+    # ── RANGE CONTRACTION (VCP structure)
     seg1 = base_close.iloc[:20]
     seg2 = base_close.iloc[20:40]
     seg3 = base_close.iloc[40:]
@@ -154,7 +166,7 @@ def score_stock(ticker, sector):
     elif r3 < r2:
         score += 10
 
-    # ── ATR CONTRACTION
+    # ── ATR contraction
     atr = compute_atr(df)
     atr_ratio = atr.iloc[-12:].mean() / atr.iloc[-60:].mean()
 
@@ -163,17 +175,17 @@ def score_stock(ticker, sector):
     elif atr_ratio < 0.9:
         score += 10
 
-    # ── VOLUME DRY-UP
+    # ── Volume dry-up
     vols = volume.iloc[-60:]
     if vols.iloc[30:].mean() < vols.iloc[:30].mean():
         score += 10
 
-    # ── REMOVE TREND GRINDERS
+    # ── Remove slow trend grinders
     slope = np.polyfit(range(len(recent_close)), recent_close, 1)[0]
     if slope > 0:
         score -= 15
 
-    # ── STRICT: NO BREAKOUT ALREADY
+    # ── STRICT: no breakout already
     if close.iloc[-1] > recent_close.max() * 1.02:
         return None
 
@@ -198,7 +210,6 @@ def run():
 
     for sector in sectors:
         tickers = get_stocks(sector)
-
         print(f"Scanning {sector} ({len(tickers)})")
 
         for t in tickers:
@@ -212,14 +223,13 @@ def run():
 
     df = pd.DataFrame(results)
 
-    # ✅ ALWAYS CREATE FILE (important for GitHub)
+    # ALWAYS CREATE FILE
     if df.empty:
         print("\n❌ No candidates")
         df = pd.DataFrame(columns=["Ticker", "Sector", "Score", "Price"])
         df.to_csv("sniper_candidates.csv", index=False)
         return
 
-    # ── CLEAN OUTPUT
     df = df.sort_values("Score", ascending=False)
     df = df.drop_duplicates(subset=["Ticker"])
     df = df.head(CFG["top_n"])
