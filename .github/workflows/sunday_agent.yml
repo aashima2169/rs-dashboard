@@ -1,19 +1,16 @@
 name: Multi-Agent Trading System
 
 on:
+  workflow_dispatch: # Allows manual trigger
   schedule:
-    # Runs Monday-Friday at 10:30 UTC (4:00 PM IST)
-    - cron: '30 10 * * 1-5'
-    # Sunday run at 2:30 PM UTC (8:00 PM IST)
-    - cron: '30 14 * * 0'
-  workflow_dispatch: 
+    - cron: '30 10 * * 1-5' # Runs at 4:00 PM IST (10:30 UTC) Mon-Fri
 
 jobs:
   report:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -37,7 +34,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python sniper_agent.py
 
-      -  name: Upload Candidate List
+      - name: Upload Candidate List
+        if: always() # Ensures the file is uploaded even if the scan finds 0 stocks
         uses: actions/upload-artifact@v4
         with:
           name: sniper-trading-list
