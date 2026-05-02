@@ -10,23 +10,48 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def get_stocks(sector_key):
+    """Resilient fetcher for NSE index constituents."""
     try:
         with open('config.json', 'r') as f:
             config = json.load(f)
+        
         official_name = config.get("nse_index_mapping", {}).get(sector_key)
-        headers = {"User-Agent": "Mozilla/5.0"}
+        if not official_name:
+            print(f"⚠️ No mapping found for {sector_key} in config.json")
+            return []
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.nseindia.com/"
+        }
+        
         session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers, timeout=10)
+        # Hit home page to get session cookies
+        session.get("https://www.nseindia.com", headers=headers, timeout=15)
+        
         url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
-        response = session.get(url, headers=headers, timeout=10)
+        response = session.get(url, headers=headers, timeout=15)
+        
         if response.status_code == 200:
-            return [f"{s['symbol']}.NS" for s in response.json()['data'] if s['symbol'] != official_name]
+            data = response.json()
+            # Extract symbols and append .NS for Yahoo Finance compatibility
+            symbols = [f"{s['symbol']}.NS" for s in data['data'] if s['symbol'] != official_name]
+            return symbols
+        else:
+            print(f"❌ NSE API Error for {sector_key}: Status {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"❌ Error fetching {sector_key}: {e}")
         return []
-    except: return []
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: EMA TREND + SCALABLE METRICS ---")
-    if not os.path.exists('active_sectors.json'): return
+    print("\n🎯 --- SNIPER MISSION: EMA TREND SCAN ---")
+    if not os.path.exists('active_sectors.json'):
+        print("❌ active_sectors.json not found!")
+        return
+        
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
 
@@ -35,7 +60,8 @@ def run_sniper():
     
     for sector in active_sectors:
         tickers = get_stocks(sector)
-        print(f"📂 Sector [{sector}]: Screening...")
+        # Fix: Added back the ticker count to debug if get_stocks is failing
+        print(f"📂 Sector [{sector}]: Found {len(tickers)} tickers. Starting analysis...")
         
         for t in tickers:
             try:
@@ -46,21 +72,19 @@ def run_sniper():
                 volume = df['Volume']
                 cmp = float(close.iloc[-1])
                 
-                # --- CORE TREND RULES (The only hard filters left) ---
+                # --- CORE TREND RULES (EMA 10 > 21 > 50) ---
                 ema10 = close.ewm(span=10).mean().iloc[-1]
                 ema21 = close.ewm(span=21).mean().iloc[-1]
                 ema50 = close.ewm(span=50).mean().iloc[-1]
                 
-                # We only filter for the basic uptrend you requested
+                # Logic per your requirement: Stacked EMAs and Price above EMA50
                 if ema10 > ema21 > ema50 and cmp > ema50:
                     
-                    # --- CALCULATE METRICS (Instead of filtering by them) ---
-                    # 1. Volume Dry-up (VDU): Lower is better
+                    # Metrics for your CSV 
                     avg_vol_20 = volume.rolling(20).mean().iloc[-1]
                     curr_vol_3 = volume.tail(3).mean()
                     vdu_ratio = round(curr_vol_3 / avg_vol_20, 2)
                     
-                    # 2. Tightness (VCP): Current 10-day volatility vs 40-day volatility
                     std_10 = close.tail(10).std()
                     std_40 = close.tail(40).std()
                     vcp_ratio = round(std_10 / std_40, 2) if std_40 > 0 else 1.0
@@ -79,26 +103,19 @@ def run_sniper():
             time.sleep(0.05)
 
     if all_data:
-        # Sort by VDU_Ratio so the "Dry-up" candidates are at the top
+        # Sort by VDU for the CSV export
         all_data = sorted(all_data, key=lambda x: x['VDU_Ratio'])
-        df_results = pd.DataFrame(all_data)
-        df_results.to_csv(filename, index=False)
+        pd.DataFrame(all_data).to_csv(filename, index=False)
         
-        # Send File to Telegram
+        # Send to Telegram
         url_doc = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
         with open(filename, "rb") as file:
             requests.post(url_doc, data={"chat_id": CHAT_ID}, files={"document": file})
             
         msg = f"🎯 **SCAN COMPLETE: {len(all_data)} MATCHES**\n"
-        msg += "List sorted by lowest Volume Dry-up (VDU).\n"
-        msg += "`TICKER   CMP      VDU    TIGHT` \n"
-        for c in all_data[:12]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU_Ratio']).ljust(6)} {str(c['VCP_Tightness']).ljust(5)}` \n"
-        
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                     json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+                     json={"chat_id": CHAT_ID, "text": msg})
     else:
-        # Always create file for YAML safety
         pd.DataFrame(columns=["Ticker"]).to_csv(filename, index=False)
         print("ℹ️ No trending stocks found (EMA 10>21>50 failed).")
 
