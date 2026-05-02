@@ -1,38 +1,54 @@
-import pandas as pd
-import numpy as np
-import yfinance as yf
-import json
 import os
+import json
+import time
+import requests
+import pandas as pd
+import yfinance as yf
 
 # ==============================
-# CONFIG
+# NSE STOCK FETCH (DYNAMIC)
 # ==============================
-TIMEFRAME = "1y"
-INTERVAL = "1wk"
-
-
-# ==============================
-# DATA FETCH
-# ==============================
-def get_data(ticker):
+def get_stocks(sector):
     try:
-        df = yf.download(ticker, period=TIMEFRAME, interval=INTERVAL, progress=False)
-        if df is None or len(df) < 30:
-            return None
-        return df.dropna()
-    except:
-        return None
+        with open("config.json", "r") as f:
+            config = json.load(f)
+
+        index_name = config["sectors"].get(sector)
+
+        if not index_name:
+            return []
+
+        url = f"https://www.nseindia.com/api/equity-stockIndices?index={index_name}"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+            "Referer": "https://www.nseindia.com/"
+        }
+
+        session = requests.Session()
+        session.get("https://www.nseindia.com", headers=headers)
+
+        data = session.get(url, headers=headers).json()
+
+        tickers = [d["symbol"] + ".NS" for d in data["data"]]
+
+        return tickers[:30]  # limit universe
+
+    except Exception as e:
+        print(f"⚠️ Failed to fetch stocks for {sector}: {e}")
+        return []
 
 
 # ==============================
-# VCP SCORING FUNCTION
+# VCP SCORE FUNCTION
 # ==============================
 def vcp_score(df):
     close = df["Close"]
     high = df["High"]
     low = df["Low"]
 
-    # ── EMA STRUCTURE ──
+    # --- EMA STRUCTURE ---
     ema21 = close.ewm(span=21).mean()
     ema50 = close.ewm(span=50).mean()
     ema200 = close.ewm(span=200).mean()
@@ -42,47 +58,46 @@ def vcp_score(df):
 
     score = 0
 
-    # ── ATR CONTRACTION ──
+    # --- ATR CONTRACTION ---
     tr = high - low
     atr = tr.rolling(14).mean()
     if atr.iloc[-1] < atr.iloc[-5]:
         score += 25
 
-    # ── RANGE CONTRACTION ──
+    # --- RANGE CONTRACTION ---
     ranges = (high - low).rolling(5).mean()
     if ranges.iloc[-1] < ranges.iloc[-5]:
         score += 25
 
-    # ── CANDLE COMPRESSION ──
+    # --- CANDLE COMPRESSION ---
     bodies = abs(close - df["Open"])
     if bodies.iloc[-1] < bodies.iloc[-5]:
         score += 15
 
     # ==============================
-    # 🔥 RIGHT SIDE (STRICT VCP)
+    # 🔥 RIGHT SIDE (STRICT FIX)
     # ==============================
     recent = df.iloc[-15:]
-    recent_close = recent["Close"]
+    last_7 = recent["Close"].iloc[-7:]
 
-    # 1. Tight consolidation
-    last_7 = recent_close.iloc[-7:]
+    # Tight range
     tight_range = (last_7.max() - last_7.min()) / last_7.max()
     if tight_range > 0.045:
         return None
     else:
         score += 20
 
-    # 2. No breakout already
+    # No breakout already
     if close.iloc[-1] > last_7.max() * 1.015:
         return None
 
-    # 3. No vertical move into base
+    # No vertical spike into base
     prev_move = close.iloc[-15:-7]
     move_pct = (prev_move.iloc[-1] - prev_move.iloc[0]) / prev_move.iloc[0]
     if move_pct > 0.12:
         return None
 
-    # 4. Compression structure (bonus, not strict)
+    # Compression structure (bonus)
     highs = recent["High"].iloc[-7:]
     compress_count = sum(
         highs.iloc[i] >= highs.iloc[i + 1]
@@ -103,52 +118,49 @@ def vcp_score(df):
 
 
 # ==============================
-# SCANNER
+# MAIN SNIPER
 # ==============================
-def run_scan(sectors):
+def run_sniper():
+    print("\n🎯 VCP SNIPER (FINAL)\n")
+
+    if not os.path.exists("active_sectors.json"):
+        print("❌ active_sectors.json not found")
+        return
+
+    with open("active_sectors.json", "r") as f:
+        active_sectors = json.load(f)
+
     results = []
 
-    for sector, tickers in sectors.items():
-        print(f"Scanning {sector} ({len(tickers)})")
+    for sector in active_sectors:
+        print(f"Scanning {sector}...")
+        tickers = get_stocks(sector)
 
-        for ticker in tickers:
-            df = get_data(ticker)
-            if df is None:
+        for t in tickers:
+            try:
+                df = yf.download(t, period="1y", interval="1wk", progress=False)
+
+                if df.empty or len(df) < 30:
+                    continue
+
+                score = vcp_score(df)
+
+                if score is not None:
+                    results.append({
+                        "Ticker": t,
+                        "Sector": sector,
+                        "Score": round(score, 2),
+                        "Price": round(df["Close"].iloc[-1], 2)
+                    })
+
+            except:
                 continue
 
-            score = vcp_score(df)
-
-            if score is not None:
-                results.append({
-                    "Ticker": ticker,
-                    "Sector": sector,
-                    "Score": round(score, 2),
-                    "Price": round(df["Close"].iloc[-1], 2)
-                })
-
-    return results
-
-
-# ==============================
-# MAIN
-# ==============================
-if __name__ == "__main__":
-
-    print("🎯 VCP SNIPER (PRODUCTION MODE)\n")
-
-    # ✅ Load Scout Output
-    if os.path.exists("scout_output.json"):
-        with open("scout_output.json", "r") as f:
-            sectors = json.load(f)
-    else:
-        print("❌ scout_output.json not found")
-        sectors = {}
-
-    results = run_scan(sectors)
+            time.sleep(0.05)
 
     df = pd.DataFrame(results)
 
-    # ✅ Always create CSV (prevents GitHub artifact failure)
+    # Always create CSV
     if df.empty:
         df = pd.DataFrame(columns=["Ticker", "Sector", "Score", "Price"])
 
@@ -158,3 +170,10 @@ if __name__ == "__main__":
     print(df.to_string(index=False))
 
     df.to_csv("sniper_candidates.csv", index=False)
+
+
+# ==============================
+# ENTRY
+# ==============================
+if __name__ == "__main__":
+    run_sniper()
