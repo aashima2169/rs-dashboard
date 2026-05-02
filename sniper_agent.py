@@ -7,22 +7,22 @@ import yfinance as yf
 
 
 # ================================
-# CONFIG
+# CONFIG (UPDATED)
 # ================================
 CONFIG = {
-    "pole_lookback_days": 60,
-    "pole_exclude_recent": 5,
-    "pole_trough_window": 20,
-    "min_pole_pct": 20,
-    "max_pole_pct": 120,
+    "pole_lookback_days": 120,
+    "pole_exclude_recent": 10,
+    "pole_trough_window": 30,
+    "min_pole_pct": 18,
+    "max_pole_pct": 150,
 
-    "vcp_base_days": 25,
+    "vcp_base_days": 30,
     "min_base_bars": 15,
 }
 
 
 # ================================
-# NSE STOCK FETCHER (DYNAMIC)
+# NSE STOCK FETCHER (YOUR LOGIC)
 # ================================
 def get_stocks(sector_key: str) -> list:
     try:
@@ -58,7 +58,7 @@ def get_stocks(sector_key: str) -> list:
 
 
 # ================================
-# CORE VCP DETECTION (DEBUG MODE)
+# VCP DETECTION (DEBUG BASE MODE)
 # ================================
 def detect_vcp(ticker, sector, cfg, fails):
     try:
@@ -72,22 +72,20 @@ def detect_vcp(ticker, sector, cfg, fails):
             df.columns = df.columns.get_level_values(0)
 
         close = df["Close"]
-
         cmp = float(close.iloc[-1])
 
         # ========================
-        # TREND FILTER
+        # TREND (RELAXED)
         # ========================
         ema21 = float(close.ewm(span=21).mean().iloc[-1])
         ema50 = float(close.ewm(span=50).mean().iloc[-1])
-        ema200 = float(close.ewm(span=200).mean().iloc[-1])
 
-        if not ((ema21 > ema50 > ema200) and (cmp > ema50)):
+        if not ((ema21 > ema50) and (cmp > ema50)):
             fails["Trend"] += 1
             return None
 
         # ========================
-        # POLE DETECTION
+        # POLE
         # ========================
         exclude = cfg["pole_exclude_recent"]
         search = close.iloc[-(cfg["pole_lookback_days"] + exclude):-exclude]
@@ -105,7 +103,7 @@ def detect_vcp(ticker, sector, cfg, fails):
             return None
 
         # ========================
-        # BASE / CONTRACTION ONLY
+        # BASE / CONTRACTION
         # ========================
         base = close.loc[idx:].tail(cfg["vcp_base_days"])
 
@@ -121,7 +119,6 @@ def detect_vcp(ticker, sector, cfg, fails):
 
         contraction_ratio = base_range / pole_range
 
-        # RELAXED filter (debug phase)
         if contraction_ratio > 0.8:
             fails["Contraction"] += 1
             return None
@@ -134,16 +131,16 @@ def detect_vcp(ticker, sector, cfg, fails):
             "Price": round(cmp, 2),
         }
 
-    except Exception as e:
+    except Exception:
         fails["Error"] += 1
         return None
 
 
 # ================================
-# MAIN RUNNER
+# MAIN
 # ================================
 def run_sniper():
-    print("\n🎯 VCP SNIPER (DEBUG MODE)\n")
+    print("\n🎯 VCP SNIPER (FINAL DEBUG MODE)\n")
 
     if not os.path.exists("active_sectors.json"):
         print("❌ active_sectors.json not found")
@@ -173,6 +170,19 @@ def run_sniper():
                 results.append(res)
 
             time.sleep(0.05)
+
+    # ========================
+    # REMOVE DUPLICATES
+    # ========================
+    seen = set()
+    unique_results = []
+
+    for r in results:
+        if r["Ticker"] not in seen:
+            unique_results.append(r)
+            seen.add(r["Ticker"])
+
+    results = unique_results
 
     # ========================
     # OUTPUT
