@@ -1,90 +1,107 @@
-import os, requests, json
+import os, requests, json, time
 import pandas as pd
 import yfinance as yf
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-def get_safe_close(df):
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    return df['Close'].dropna()
-
-def calc_percentile(series):
-    if series.empty: return 0
-    current = series.iloc[-1]
-    return (series < current).mean() * 100
-
-def run_agent():
-    print("📊 --- SCOUT AGENT SESSION START ---")
+def get_stocks(sector_key):
+    """Fetches constituents with a mandatory cookie handshake to bypass NSE blocks."""
     try:
         with open('config.json', 'r') as f:
             config = json.load(f)
+        official_name = config.get("nse_index_mapping", {}).get(sector_key)
         
-        sector_tickers = config.get("sectors", {})
-        bm_data = get_safe_close(yf.download("^NSEI", period="1y", progress=False))
+        # 1. Setup Session with Browser-like Headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br"
+        }
+        session = requests.Session()
         
-        results = []
-        for name, ticker in sector_tickers.items():
-            print(f"🔍 [SCANNING] {name}")
-            try:
-                s_data = get_safe_close(yf.download(ticker, period="1y", progress=False))
-                if s_data.empty or len(s_data) < 126: continue
-
-                combined = pd.concat([s_data, bm_data], axis=1).dropna()
-                combined.columns = ['s', 'b']
-                rs = combined['s'] / combined['b']
-                
-                # Performance Math (%)
-                p3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
-                p6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
-                
-                # Rank Math (Percentile)
-                r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
-                r6 = round(calc_percentile(rs.pct_change(126).tail(252)))
-                
-                results.append({
-                    "name": name, 
-                    "p3": p3, "p6": p6, 
-                    "r3": r3, "r6": r6, 
-                    "prc": round((r3+r6)/2)
-                })
-            except Exception as e:
-                print(f"   ⚠️ Error: {e}")
-
-        df = pd.DataFrame(results).sort_values("prc", ascending=False)
-        # Sniper Filter: Positive velocity only
-        active_sectors = df[(df['p3'] > 0) & (df['p6'] > 0)]['name'].tolist()
-
-        with open('active_sectors.json', 'w') as f:
-            json.dump(active_sectors, f)
-
-        # --- TELEGRAM MESSAGE ---
-        msg = "📊 **SCOUT REPORT - SECTOR RANKINGS**\n\n"
-        msg += "`SECTOR         3M_R  6M_R  PRC` \n"
-        msg += "`------------------------------` \n"
-        for _, r in df.iterrows():
-            msg += f"`{r['name'].ljust(14)} {str(r['r3']).ljust(5)} {str(r['r6']).ljust(5)} {str(r['prc']).ljust(3)}` \n"
-
-        msg += "\n🚀 **VELOCITY REPORT (%)**\n"
-        msg += "`SECTOR         3M_%    6M_%` \n"
-        msg += "`---------------------------` \n"
-        for _, r in df.iterrows():
-            msg += f"`{r['name'].ljust(14)} {str(r['p3']).ljust(7)} {str(r['p6']).ljust(7)}` \n"
-
-        if not df.empty:
-            top = df.iloc[0]
-            msg += f"\n💡 **TOP LEAD:** {top['name']} (PRC {top['prc']})"
+        # 2. Cookie Handshake (Visit NSE home first)
+        session.get("https://www.nseindia.com", headers=headers, timeout=10)
         
-        msg += f"\n🎯 **SNIPER TARGETS:** {', '.join(active_sectors)}"
-
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                     json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+        # 3. Fetch the Index Data
+        # We use the specific API URL for index constituents
+        url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
+        response = session.get(url, headers=headers, timeout=10)
         
-        print(f"✅ SCOUT COMPLETED. Active: {active_sectors}")
-
+        if response.status_code == 200:
+            data = response.json()
+            stocks = [f"{s['symbol']}.NS" for s in data['data'] if s['symbol'] != official_name]
+            # Remove duplicates and index names
+            return list(set(stocks))
+        
+        print(f"  ⚠️ NSE returned status {response.status_code} for {official_name}")
+        return []
     except Exception as e:
-        print(f"❌ CRITICAL ERROR: {e}")
+        print(f"  ❌ Fetch Error for {sector_key}: {e}")
+        return []
+
+def professional_screen(ticker):
+    """Trend & VCP Filter"""
+    try:
+        # Use session to prevent Yahoo 404s
+        session = requests.Session()
+        session.headers.update({'User-Agent': 'Mozilla/5.0'})
+        
+        df = yf.download(ticker, period="1y", progress=False, session=session, auto_adjust=True)
+        if df.empty or len(df) < 100: return None
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+
+        close = df['Close'].dropna()
+        curr_price = float(close.iloc[-1].item())
+        
+        ema20 = close.ewm(span=20).mean().iloc[-1]
+        ema50 = close.ewm(span=50).mean().iloc[-1]
+        ema100 = close.ewm(span=100).mean().iloc[-1]
+        
+        # Filter: Price > 20 > 50 > 100 + Not extended from 20 EMA
+        if not (curr_price > ema20 > ema50 > ema100): return None
+        if curr_price > (ema20 * 1.09): return None
+
+        # VCP Tightness (last 10 days vs previous 30)
+        h10, l10 = df['High'].tail(10).max(), df['Low'].tail(10).min()
+        h30, l30 = df['High'].iloc[-40:-10].max(), df['Low'].iloc[-40:-10].min()
+        tightness = (h10 - l10) / (h30 - l30)
+
+        if tightness < 1.0: # Good squeeze
+            return {"ticker": ticker, "price": round(curr_price, 2), "tight": round(float(tightness), 2)}
+    except:
+        return None
+
+def run_sniper():
+    print("🔫 SNIPER AGENT STARTED...")
+    if not os.path.exists('active_sectors.json'): return
+    with open('active_sectors.json', 'r') as f:
+        active_sectors = json.load(f)
+    
+    all_candidates = []
+    for sector in active_sectors:
+        tickers = get_stocks(sector)
+        print(f"🔍 {sector}: Found {len(tickers)} stocks")
+        
+        for t in tickers:
+            time.sleep(0.2) # Slightly slower to be safe
+            res = professional_screen(t)
+            if res:
+                res['sector'] = sector
+                all_candidates.append(res)
+                print(f"   🔥 Hit: {t}")
+
+    if all_candidates:
+        all_candidates = sorted(all_candidates, key=lambda x: x['tight'])
+        msg = "🎯 **SNIPER VCP REPORT**\n\n`TICKER   SECTOR   PRICE    TIGHT`\n"
+        for c in all_candidates[:15]:
+            msg += f"`{c['ticker'].ljust(8)} {c['sector'].ljust(8)} {str(c['price']).ljust(8)} {str(c['tight']).ljust(5)}` \n"
+    else:
+        msg = "🎯 **SNIPER REPORT**: No stocks met criteria in active sectors."
+
+    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                 json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+    print("✅ DONE.")
 
 if __name__ == "__main__":
-    run_agent()
+    run_sniper()
