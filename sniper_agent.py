@@ -24,7 +24,7 @@ def get_stocks(sector_key):
     except: return []
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: HIGH TIGHT FLAG (HTF) ---")
+    print("\n🎯 --- HTF STEP 1: POLE DETECTION ONLY ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
@@ -37,58 +37,36 @@ def run_sniper():
         for t in tickers:
             try:
                 df = yf.download(t, period="1y", progress=False, auto_adjust=True)
-                if df.empty or len(df) < 60: continue
+                if df.empty or len(df) < 40: continue
                 
                 close = df['Close']
-                high = df['High']
-                low = df['Low']
-                volume = df['Volume']
                 cmp = float(close.iloc[-1])
 
-                # --- 1. THE POLE CHECK (Strong Momentum) ---
-                # Price must be up at least 20% in the last 30 trading days
+                # --- THE POLE CALCULATION ---
+                # Check performance over the last 30 trading days (~6 weeks)
                 price_30_days_ago = float(close.iloc[-30])
-                momentum_pct = ((cmp - price_30_days_ago) / price_30_days_ago) * 100
+                pole_pct = ((cmp - price_30_days_ago) / price_30_days_ago) * 100
                 
-                # --- 2. HIGH & TIGHT CHECK (Proximity to Peak) ---
-                recent_peak = high.tail(30).max()
-                dist_from_peak = ((recent_peak - cmp) / recent_peak) * 100
-                
-                # --- 3. THE VCP (6-Day Consolidation & Volume Dry-up) ---
-                last_6_high = high.tail(6).max()
-                last_6_low = low.tail(6).min()
-                consol_range = ((last_6_high - last_6_low) / last_6_low) * 100
-                
-                avg_vol_20 = volume.rolling(20).mean().iloc[-1]
-                curr_vol_3 = volume.tail(3).mean()
-                vdu_ratio = curr_vol_3 / avg_vol_20
-
-                # --- 4. EMA STACK (10 > 21 > 50) ---
+                # --- EMA TREND BASELINE ---
                 ema10 = close.ewm(span=10).mean().iloc[-1]
                 ema21 = close.ewm(span=21).mean().iloc[-1]
                 ema50 = close.ewm(span=50).mean().iloc[-1]
 
-                # --- THE HARD FILTERS ---
-                if (momentum_pct > 15 and           # Must have a 'Pole'
-                    dist_from_peak < 8 and          # Must be 'High' (within 8% of peak)
-                    consol_range < 4.0 and          # Must be 'Tight' (6-day box < 4%)
-                    vdu_ratio < 0.9 and             # Volume must be 'Drying'
-                    ema10 > ema21 > ema50 and       # EMA Trend Stack
-                    cmp > ema10):                   # Must be riding the 10 EMA (Strength)
-
+                # FILTER: Only Pole strength + EMA Trend (No consolidation/VDU yet)
+                if pole_pct >= 20.0 and ema10 > ema21 > ema50 and cmp > ema50:
                     all_data.append({
-                        "Ticker": t, "CMP": round(cmp, 2),
-                        "Pole_%": round(momentum_pct, 1),
-                        "Range_%": round(consol_range, 1),
-                        "VDU": round(vdu_ratio, 2),
-                        "Dist_Peak": round(dist_from_peak, 1)
+                        "Ticker": t, 
+                        "Sector": sector,
+                        "CMP": round(cmp, 2),
+                        "Pole_%": round(pole_pct, 2)
                     })
             except: continue
             time.sleep(0.05)
 
     if all_data:
-        all_data = sorted(all_data, key=lambda x: x['Range_%']) # Tightest first
-        filename = "htf_candidates.csv"
+        # Sort by strongest Pole first
+        all_data = sorted(all_data, key=lambda x: x['Pole_%'], reverse=True)
+        filename = "pole_results.csv"
         pd.DataFrame(all_data).to_csv(filename, index=False)
         
         # Send to Telegram
@@ -96,13 +74,13 @@ def run_sniper():
         with open(filename, "rb") as file:
             requests.post(url_doc, data={"chat_id": CHAT_ID}, files={"document": file})
             
-        msg = "🚩 **HIGH TIGHT FLAG DETECTED**\n`TICKER   POLE%  RANGE%  VDU` \n"
-        for c in all_data[:10]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['Pole_%']).ljust(6)} {str(c['Range_%']).ljust(6)} {str(c['VDU']).ljust(5)}` \n"
+        msg = "🚩 **HTF STEP 1: STRONG POLES FOUND**\n`TICKER   CMP      POLE%` \n"
+        for c in all_data[:12]:
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['Pole_%']).ljust(6)}` \n"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
-        print("ℹ️ No High Tight Flags found today.")
+        print("ℹ️ No stocks found with a 20%+ pole in 30 days.")
 
 if __name__ == "__main__":
     run_sniper()
