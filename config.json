@@ -4,8 +4,7 @@
     "PSE": "^CNXPSE",
     "Pharma": "^CNXPHARMA",
     "CPSE": "CPSEETF.NS",
-    "Metal": "^CNXMETAL",
-    "Digital": "NETGIGETF.NS"
+    "Metal": "^CNXMETAL"
   },
   "always_scan": ["Digital"],
   "nse_index_mapping": {
@@ -13,7 +12,6 @@
     "PSE": "NIFTY PSE",
     "Pharma": "NIFTY PHARMA",
     "CPSE": "NIFTY CPSE",
-    "Metal": "NIFTY METAL",
-    "Digital": "NIFTY INDIA DIGITAL"
+    "Metal": "NIFTY METAL"
   }
 }
