@@ -19,23 +19,16 @@ CFG = {
     "pole_lookback_days":    130,   # Window to search for the pole top
     "pole_exclude_recent":    20,   # Ignore last N days when searching for pole top
     "vcp_base_days":          60,   # Max days after pole top used to measure base
-    "min_base_bars":          30,   # Base must span at least this many bars
-    "min_base_depth_pct":      3,   # Base must pull back at least 3% from pole top
-    "max_base_depth_pct":     25,   # Base must not pull back more than this
-    "vol_contraction_ratio":  0.75, # 20d avg vol < 90% of 90d avg vol
-    "near_high_threshold":    0.92, # CMP within 15% of pole high
-    "min_contraction_ratio":  0.45, # Base range <= 70% of pole range
+    "min_base_bars":          15,   # Base must span at least this many bars
+    "min_contraction_ratio":  0.70, # Base range <= 70% of pole range (PASS FOR MANUAL CHECK)
 }
 
+# Updated report list to match active filters
 FILTERS = [
     "F1_EMA_Trend",        # EMA21 > EMA50 > EMA200 AND CMP > EMA50
     "F2_Pole_Size",        # min_pole_pct <= Pole% <= max_pole_pct
     "F3_Base_Formed",      # Base has >= min_base_bars
     "F4_Contraction",      # Base range <= min_contraction_ratio * pole range
-    "F5a_Base_Depth_Min",  # Base pulled back >= min_base_depth_pct
-    "F5b_Base_Depth_Max",  # Base pulled back <= max_base_depth_pct
-    "F6_Volume_Dryup",     # 20d avg vol < vol_contraction_ratio * 90d avg vol
-    "F7_Near_Breakout",    # CMP >= near_high_threshold * pole_high
 ]
 
 def get_stocks(sector_key: str) -> list:
@@ -71,11 +64,9 @@ def detect_vcp(ticker: str, sector: str, cfg: dict, filter_fails: dict) -> dict 
             df.columns = df.columns.get_level_values(0)
 
         close  = df["Close"].squeeze()
-        volume = df["Volume"].squeeze()
         cmp    = float(close.iloc[-1])
 
         # ── F1: EMA TREND ────────────────────────────────────────────────────
-        # Requirement: EMA 21 > 50 > 200 AND Price > EMA 50
         ema21  = float(close.ewm(span=21,  adjust=False).mean().iloc[-1])
         ema50  = float(close.ewm(span=50,  adjust=False).mean().iloc[-1])
         ema200 = float(close.ewm(span=200, adjust=False).mean().iloc[-1])
@@ -104,56 +95,46 @@ def detect_vcp(ticker: str, sector: str, cfg: dict, filter_fails: dict) -> dict 
             filter_fails["F2_Pole_Size"] += 1
             return None
 
-        # ── F3: BASE HAS ENOUGH BARS ─────────────────────────────────────────
+        # ── F3: BASE BARS ────────────────────────────────────────────────────
         post_peak   = close.loc[pole_high_idx:]
         base_window = post_peak.tail(cfg["vcp_base_days"])
         if len(base_window) < cfg["min_base_bars"]:
             filter_fails["F3_Base_Formed"] += 1
             return None
 
-        # ── F4: VOLATILITY CONTRACTION ───────────────────────────────────────
+        # ── F4: CONTRACTION ──────────────────────────────────────────────────
         base_high  = float(base_window.max())
         base_low   = float(base_window.min())
         pole_range = pole_high - pole_low
         base_range = base_high - base_low
         contraction_ratio = (base_range / pole_range) if pole_range > 0 else 999
+        
         if contraction_ratio > cfg["min_contraction_ratio"]:
             filter_fails["F4_Contraction"] += 1
             return None
 
-        # ── F5: BASE DEPTH ───────────────────────────────────────────────────
-        base_depth_pct = ((pole_high - base_low) / pole_high) * 100
-        if base_depth_pct < cfg["min_base_depth_pct"]:
-            filter_fails["F5a_Base_Depth_Min"] += 1
-            return None
-        if base_depth_pct > cfg["max_base_depth_pct"]:
-            filter_fails["F5b_Base_Depth_Max"] += 1
-            return None
-
-        # ── F6: VOLUME DRY-UP ────────────────────────────────────────────────
-        avg_vol_20 = float(volume.tail(20).mean())
-        avg_vol_90 = float(volume.tail(90).mean())
-        vol_ratio  = (avg_vol_20 / avg_vol_90) if avg_vol_90 > 0 else 999
-        if vol_ratio > cfg["vol_contraction_ratio"]:
-            filter_fails["F6_Volume_Dryup"] += 1
-            return None
-
-        # ── F7: NEAR BREAKOUT ────────────────────────────────────────────────
-        if cmp < pole_high * cfg["near_high_threshold"]:
-            filter_fails["F7_Near_Breakout"] += 1
-            return None
-
+        # ── EXIT POINT FOR MANUAL REVIEW ─────────────────────────────────────
+        # Returning here bypasses F5, F6, and F7 completely
         return {
-            "Ticker": ticker, "Sector": sector, "CMP": round(cmp, 2),
-            "Pole_%": round(pole_pct, 2), "Base_Depth_%": round(base_depth_pct, 2),
-            "Base_Bars": len(base_window), "Contraction_Ratio": round(contraction_ratio, 2),
-            "Vol_Ratio_20_90": round(vol_ratio, 2), "Pivot_Price": round(pole_high * 1.01, 2)
+            "Ticker": ticker, 
+            "Sector": sector, 
+            "CMP": round(cmp, 2),
+            "CTR": round(contraction_ratio, 2),
+            "Pole_%": round(pole_pct, 2),
+            "Pivot": round(pole_high * 1.01, 2)
         }
+
+        # ── DISABLED FILTERS ─────────────────────────────────────────────────
+        """
+        # F5: Base Depth Check
+        # F6: Volume Dry-up Check
+        # F7: Near Breakout Check
+        """
     except Exception:
         return None
 
 def print_filter_report(filter_fails: dict, total: int):
-    print("\n📊 FILTER ELIMINATION REPORT")
+    print("\n📊 FILTER ELIMINATION REPORT (MANUAL MODE)")
     print("-" * 40)
     for f in FILTERS:
         n = filter_fails.get(f, 0)
@@ -162,8 +143,9 @@ def print_filter_report(filter_fails: dict, total: int):
     print("-" * 40)
 
 def run_sniper():
-    print("\n🎯 --- VCP SNIPER MISSION START ---")
+    print("\n🎯 --- VCP SNIPER: MANUAL REVIEW MODE (F4 ONLY) ---")
     if not os.path.exists("active_sectors.json"):
+        print("❌ No active_sectors.json found. Run Scout Agent first.")
         return
     with open("active_sectors.json", "r") as f:
         active_sectors = json.load(f)
@@ -180,22 +162,25 @@ def run_sniper():
             if hit and ticker not in seen_tickers:
                 seen_tickers.add(ticker)
                 results.append(hit)
-                print(f"  ✅ {ticker.ljust(12)} | Pole: {hit['Pole_%']}% | Pivot: ₹{hit['Pivot_Price']}")
+                print(f"  ✅ {ticker.ljust(12)} | CTR: {hit['CTR']} | Pivot: ₹{hit['Pivot']}")
             time.sleep(0.05)
 
     print_filter_report(filter_fails, total_stocks)
 
     if results:
-        results.sort(key=lambda x: x["Contraction_Ratio"])
-        pd.DataFrame(results).to_csv("sniper_candidates.csv", index=False)
-        msg = "🎯 *VCP SNIPER — Stage 2 Bases*\n`TICKER       POLE%   DEPTH%  PIVOT`\n"
-        for r in results[:15]:
-            msg += f"`{r['Ticker'].ljust(10)} {str(r['Pole_%']).ljust(7)} {str(r['Base_Depth_%']).ljust(7)} ₹{r['Pivot_Price']}`\n"
+        # Sort by tightness (lowest contraction ratio first)
+        results.sort(key=lambda x: x["CTR"])
+        pd.DataFrame(results).to_csv("manual_vcp_review.csv", index=False)
+        
+        msg = "🔍 *MANUAL VCP REVIEW (Passes F4)*\n`TICKER      CTR    POLE%   PIVOT`\n"
+        for r in results[:30]: # Showing top 30 candidates
+            msg += f"`{r['Ticker'].ljust(10)} {str(r['CTR']).ljust(6)} {str(r['Pole_%']).ljust(7)} ₹{r['Pivot']}`\n"
+        
         if TELEGRAM_TOKEN:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                           json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
-        print("ℹ️ No stocks passed all filters.")
+        print("ℹ️ No stocks passed the F4 Contraction threshold.")
 
 if __name__ == "__main__":
     run_sniper()
