@@ -19,12 +19,12 @@ CFG = {
     "pole_lookback_days":    130,   # Window to search for the pole top
     "pole_exclude_recent":    20,   # Ignore last N days when searching for pole top
     "vcp_base_days":          60,   # Max days after pole top used to measure base
-    "min_base_bars":          15,   # Base must span at least this many bars
+    "min_base_bars":          30,   # Base must span at least this many bars
     "min_base_depth_pct":      3,   # Base must pull back at least 3% from pole top
     "max_base_depth_pct":     25,   # Base must not pull back more than this
-    "vol_contraction_ratio":  0.90, # 20d avg vol < 90% of 90d avg vol
-    "near_high_threshold":    0.85, # CMP within 15% of pole high
-    "min_contraction_ratio":  0.70, # Base range <= 70% of pole range
+    "vol_contraction_ratio":  0.75, # 20d avg vol < 90% of 90d avg vol
+    "near_high_threshold":    0.92, # CMP within 15% of pole high
+    "min_contraction_ratio":  0.45, # Base range <= 70% of pole range
 }
 
 FILTERS = [
