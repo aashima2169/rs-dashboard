@@ -85,7 +85,7 @@ def score_stock(ticker, sector):
 
     score = 0
 
-    # ── HARD FILTERS (KEEP MINIMAL)
+    # ── EMA STRUCTURE (HARD)
     ema21 = close.ewm(span=21).mean()
     ema50 = close.ewm(span=50).mean()
     ema100 = close.ewm(span=100).mean()
@@ -93,6 +93,7 @@ def score_stock(ticker, sector):
     if not (ema21.iloc[-1] > ema50.iloc[-1] > ema100.iloc[-1]):
         return None
 
+    # ── BASE
     base = df.iloc[-60:]
     base_close = base["Close"]
 
@@ -100,26 +101,28 @@ def score_stock(ticker, sector):
     if base_range > 0.35:
         return None
 
-    # ─────────────────────────────
-    # SCORING STARTS HERE
-    # ─────────────────────────────
-
-    # ── RIGHT SIDE TIGHTNESS
+    # ── RIGHT SIDE
     recent = base.iloc[-12:]
     recent_close = recent["Close"]
 
     recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
 
+    # 🔥 STRONG REWARD
     if recent_range < 0.04:
-        score += 30
+        score += 50
     elif recent_range < 0.08:
-        score += 20
+        score += 30
     elif recent_range < 0.12:
         score += 10
     else:
-        score -= 10
+        score -= 20
 
-    # ── CANDLE COMPRESSION
+    # ── SIDEWAYS (NEW)
+    std_dev = recent_close.pct_change().std()
+    if std_dev < 0.01:
+        score += 25
+
+    # ── CANDLE TIGHTNESS
     bodies = (recent["Close"] - recent["Open"]).abs()
     ranges = (recent["High"] - recent["Low"])
 
@@ -130,7 +133,7 @@ def score_stock(ticker, sector):
     elif body_ratio < 0.6:
         score += 10
     else:
-        score -= 10
+        score -= 15
 
     # ── RANGE CONTRACTION
     seg1 = base_close.iloc[:20]
@@ -142,11 +145,11 @@ def score_stock(ticker, sector):
     r3 = (seg3.max() - seg3.min()) / seg3.max()
 
     if r3 < r2 < r1:
-        score += 25
+        score += 30
     elif r3 < r2:
         score += 10
 
-    # ── ATR CONTRACTION
+    # ── ATR
     atr = compute_atr(df)
     atr_ratio = atr.iloc[-12:].mean() / atr.iloc[-60:].mean()
 
@@ -155,16 +158,20 @@ def score_stock(ticker, sector):
     elif atr_ratio < 0.9:
         score += 10
 
-    # ── VOLUME DRY-UP
+    # ── VOLUME
     vols = volume.iloc[-60:]
     if vols.iloc[30:].mean() < vols.iloc[:30].mean():
         score += 10
 
-    # ── TREND PENALTY (IMPORTANT)
+    # ── TREND KILLER (VERY IMPORTANT)
     trend = (recent_close.iloc[-1] - recent_close.iloc[0]) / recent_close.iloc[0]
 
-    if trend > 0.12:
-        score -= 15
+    if trend > 0.08:
+        score -= 40
+
+    # ── POST BREAKOUT PENALTY
+    if close.iloc[-1] > recent_close.max() * 1.03:
+        score -= 20
 
     return {
         "Ticker": ticker,
@@ -178,7 +185,7 @@ def score_stock(ticker, sector):
 # MAIN
 # ─────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (BALANCED REAL-WORLD MODE)\n")
+    print("\n🎯 VCP SNIPER (FINAL RANKING MODE)\n")
 
     with open("active_sectors.json") as f:
         sectors = json.load(f)
