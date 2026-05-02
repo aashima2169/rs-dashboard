@@ -6,7 +6,7 @@
     "CPSE": "CPSEETF.NS",
     "Metal": "^CNXMETAL"
   },
-  "always_scan": ["Digital"],
+
   "nse_index_mapping": {
     "Power": "NIFTY ENERGY",
     "PSE": "NIFTY PSE",
