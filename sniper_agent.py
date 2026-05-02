@@ -13,14 +13,9 @@ def get_stocks(sector_key):
         with open('config.json', 'r') as f:
             config = json.load(f)
         official_name = config.get("nse_index_mapping", {}).get(sector_key)
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://www.nseindia.com/"
-        }
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.nseindia.com/"}
         session = requests.Session()
         session.get("https://www.nseindia.com", headers=headers, timeout=10)
-        
         url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
         response = session.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -28,15 +23,8 @@ def get_stocks(sector_key):
         return []
     except: return []
 
-def send_telegram_file(file_path):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-        with open(file_path, "rb") as file:
-            requests.post(url, data={"chat_id": CHAT_ID}, files={"document": file})
-    except: pass
-
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: 6-CANDLE CONSOLIDATION SCAN ---")
+    print("\n🎯 --- SNIPER MISSION: HIGH TIGHT FLAG (HTF) ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
@@ -44,73 +32,77 @@ def run_sniper():
     all_data = [] 
     for sector in active_sectors:
         tickers = get_stocks(sector)
-        print(f"📂 Sector [{sector}]: Found {len(tickers)} tickers. Analyzing...")
+        print(f"📂 Sector [{sector}]: Analyzing {len(tickers)} tickers...")
         
         for t in tickers:
             try:
                 df = yf.download(t, period="1y", progress=False, auto_adjust=True)
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
-                
                 if df.empty or len(df) < 60: continue
                 
-                close = df['Close'].dropna()
-                volume = df['Volume'].dropna()
-                high = df['High'].dropna()
-                low = df['Low'].dropna()
+                close = df['Close']
+                high = df['High']
+                low = df['Low']
+                volume = df['Volume']
+                cmp = float(close.iloc[-1])
+
+                # --- 1. THE POLE CHECK (Strong Momentum) ---
+                # Price must be up at least 20% in the last 30 trading days
+                price_30_days_ago = float(close.iloc[-30])
+                momentum_pct = ((cmp - price_30_days_ago) / price_30_days_ago) * 100
                 
-                # --- EMA LOGIC ---
-                cmp = round(float(close.iloc[-1]), 2)
-                ema10 = round(close.ewm(span=10).mean().iloc[-1], 2)
-                ema21 = round(close.ewm(span=21).mean().iloc[-1], 2)
-                ema50 = round(close.ewm(span=50).mean().iloc[-1], 2)
-                dist_ema21 = round(((cmp - ema21) / ema21) * 100, 2)
+                # --- 2. HIGH & TIGHT CHECK (Proximity to Peak) ---
+                recent_peak = high.tail(30).max()
+                dist_from_peak = ((recent_peak - cmp) / recent_peak) * 100
                 
-                # --- VOLUME LOGIC (VDU) ---
+                # --- 3. THE VCP (6-Day Consolidation & Volume Dry-up) ---
+                last_6_high = high.tail(6).max()
+                last_6_low = low.tail(6).min()
+                consol_range = ((last_6_high - last_6_low) / last_6_low) * 100
+                
                 avg_vol_20 = volume.rolling(20).mean().iloc[-1]
                 curr_vol_3 = volume.tail(3).mean()
-                vdu_ratio = round(curr_vol_3 / avg_vol_20, 2)
-                
-                # --- STRICT 6-DAY CONSOLIDATION LOGIC ---
-                # Find the max high and min low of the last 6 candles
-                recent_high = high.tail(6).max()
-                recent_low = low.tail(6).min()
-                
-                # Calculate the total % range of those 6 days
-                consol_range_pct = round(((recent_high - recent_low) / recent_low) * 100, 2)
+                vdu_ratio = curr_vol_3 / avg_vol_20
 
-                # --- IMPROVED FILTERS ---
-                # 1. EMA Stack: 10 > 21 > 50 and Price > 50
-                # 2. Dist < 5%: Not overextended
-                # 3. Consolidation < 4.5%: The last 6 candles must be trapped in a tight 4.5% box
-                # 4. Volume < 1.1: Volume is drying up
-                if ema10 > ema21 > ema50 and cmp > ema50 and dist_ema21 < 5.0 and consol_range_pct <= 4.5 and vdu_ratio < 1.1:
+                # --- 4. EMA STACK (10 > 21 > 50) ---
+                ema10 = close.ewm(span=10).mean().iloc[-1]
+                ema21 = close.ewm(span=21).mean().iloc[-1]
+                ema50 = close.ewm(span=50).mean().iloc[-1]
+
+                # --- THE HARD FILTERS ---
+                if (momentum_pct > 15 and           # Must have a 'Pole'
+                    dist_from_peak < 8 and          # Must be 'High' (within 8% of peak)
+                    consol_range < 4.0 and          # Must be 'Tight' (6-day box < 4%)
+                    vdu_ratio < 0.9 and             # Volume must be 'Drying'
+                    ema10 > ema21 > ema50 and       # EMA Trend Stack
+                    cmp > ema10):                   # Must be riding the 10 EMA (Strength)
+
                     all_data.append({
-                        "Ticker": t, "Sector": sector, "CMP": cmp,
-                        "EMA10": ema10, "EMA21": ema21, "EMA50": ema50,
-                        "VDU": vdu_ratio, "Consol_%": consol_range_pct,
-                        "Dist_21_%": dist_ema21
+                        "Ticker": t, "CMP": round(cmp, 2),
+                        "Pole_%": round(momentum_pct, 1),
+                        "Range_%": round(consol_range, 1),
+                        "VDU": round(vdu_ratio, 2),
+                        "Dist_Peak": round(dist_from_peak, 1)
                     })
             except: continue
             time.sleep(0.05)
 
     if all_data:
-        # Sort by the tightest consolidation first
-        all_data = sorted(all_data, key=lambda x: x['Consol_%'])
-        
-        filename = "sniper_candidates.csv"
+        all_data = sorted(all_data, key=lambda x: x['Range_%']) # Tightest first
+        filename = "htf_candidates.csv"
         pd.DataFrame(all_data).to_csv(filename, index=False)
-        send_telegram_file(filename)
         
-        msg = "🎯 **SNIPER ELITE: TIGHT CONSOLIDATION**\n"
-        msg += "`TICKER   CMP      VDU    RANGE%` \n"
-        for c in all_data[:12]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU']).ljust(6)} {str(c['Consol_%']).ljust(5)}` \n"
+        # Send to Telegram
+        url_doc = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+        with open(filename, "rb") as file:
+            requests.post(url_doc, data={"chat_id": CHAT_ID}, files={"document": file})
+            
+        msg = "🚩 **HIGH TIGHT FLAG DETECTED**\n`TICKER   POLE%  RANGE%  VDU` \n"
+        for c in all_data[:10]:
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['Pole_%']).ljust(6)} {str(c['Range_%']).ljust(6)} {str(c['VDU']).ljust(5)}` \n"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
-        pd.DataFrame(columns=["Ticker"]).to_csv("sniper_candidates.csv", index=False)
-        print("ℹ️ No matches found today.")
+        print("ℹ️ No High Tight Flags found today.")
 
 if __name__ == "__main__":
     run_sniper()
