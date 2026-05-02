@@ -77,7 +77,7 @@ def compute_atr(df, period=14):
     return atr
 
 
-def candle_body_size(df):
+def candle_body(df):
     return (df["Close"] - df["Open"]).abs()
 
 
@@ -86,7 +86,7 @@ def candle_range(df):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SCORING ENGINE (STRUCTURE FIRST + COMPRESSION)
+# SCORING
 # ─────────────────────────────────────────────────────────────────────────────
 def score_stock(ticker, sector):
     df = download(ticker)
@@ -97,18 +97,24 @@ def score_stock(ticker, sector):
     volume = df["Volume"]
 
     score = 0
-    tightness_score = 0
+    tightness = 0
 
-    # ── TREND (light weight)
-    ema50 = close.ewm(span=50).mean().iloc[-1]
-    ema200 = close.ewm(span=200).mean().iloc[-1]
+    # ── EMA STRUCTURE (STRICT FILTER)
+    ema21 = close.ewm(span=21).mean()
+    ema50 = close.ewm(span=50).mean()
+    ema100 = close.ewm(span=100).mean()
 
-    if ema50 > ema200:
-        score += 5
-    if close.iloc[-1] > ema50:
-        score += 5
+    if not (ema21.iloc[-1] > ema50.iloc[-1] > ema100.iloc[-1]):
+        return None
 
-    # ── PRIOR MOVE (pole)
+    if close.iloc[-1] < ema21.iloc[-1]:
+        return None
+
+    # slope check (important)
+    if ema21.iloc[-1] <= ema21.iloc[-5]:
+        score -= 5
+
+    # ── PRIOR MOVE
     move = (close.iloc[-150:].max() - close.iloc[-150:].min()) / close.iloc[-150:].min()
     score += min(8, move * 8)
 
@@ -117,37 +123,36 @@ def score_stock(ticker, sector):
     base_close = base["Close"]
 
     base_range = (base_close.max() - base_close.min()) / base_close.max()
-
     if base_range > 0.30:
         return None
 
     # ── BASE TIGHTNESS
     if base_range < 0.08:
-        tightness_score += 20
+        tightness += 20
     elif base_range < 0.12:
-        tightness_score += 15
+        tightness += 15
     elif base_range < 0.18:
-        tightness_score += 8
+        tightness += 8
 
-    # ── RIGHT SIDE TIGHTNESS
+    # ── RIGHT SIDE
     recent = base.iloc[-15:]
     recent_close = recent["Close"]
 
     recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
 
     if recent_range < 0.05:
-        tightness_score += 20
+        tightness += 20
     elif recent_range < 0.08:
-        tightness_score += 15
+        tightness += 15
     elif recent_range < 0.12:
-        tightness_score += 5
+        tightness += 5
     else:
-        tightness_score -= 10
+        tightness -= 10
 
     if recent_range > 0.15:
         score -= 15
 
-    # ── RANGE CONTRACTION (CORE VCP LOGIC)
+    # ── RANGE CONTRACTION
     seg1 = base_close.iloc[:20]
     seg2 = base_close.iloc[20:40]
     seg3 = base_close.iloc[40:]
@@ -157,65 +162,43 @@ def score_stock(ticker, sector):
     r3 = (seg3.max() - seg3.min()) / seg3.max()
 
     if r3 < r2 < r1:
-        tightness_score += 20
+        tightness += 20
     else:
         score -= 10
 
     # ── ATR CONTRACTION
     atr = compute_atr(df)
-
-    atr_base = atr.iloc[-60:]
-    atr_recent = atr.iloc[-15:]
-
-    atr_ratio = atr_recent.mean() / atr_base.mean()
+    atr_ratio = atr.iloc[-15:].mean() / atr.iloc[-60:].mean()
 
     if atr_ratio < 0.6:
-        tightness_score += 15
+        tightness += 15
     elif atr_ratio < 0.8:
-        tightness_score += 10
+        tightness += 10
     elif atr_ratio < 1.0:
-        tightness_score += 5
+        tightness += 5
     else:
         score -= 8
 
-    # ── CANDLE COMPRESSION (NEW)
-    body = candle_body_size(base)
+    # ── CANDLE COMPRESSION
+    body = candle_body(base)
     rng = candle_range(base)
 
-    body_base = body.iloc[:45].mean()
-    body_recent = body.iloc[45:].mean()
+    if body.iloc[-15:].mean() < body.iloc[:45].mean() * 0.7:
+        tightness += 10
+    if rng.iloc[-15:].mean() < rng.iloc[:45].mean() * 0.7:
+        tightness += 10
 
-    range_base = rng.iloc[:45].mean()
-    range_recent = rng.iloc[45:].mean()
-
-    # body contraction
-    if body_recent < body_base * 0.7:
-        tightness_score += 10
-    elif body_recent < body_base * 0.85:
-        tightness_score += 5
-    else:
-        score -= 5
-
-    # range contraction
-    if range_recent < range_base * 0.7:
-        tightness_score += 10
-    elif range_recent < range_base * 0.85:
-        tightness_score += 5
-    else:
-        score -= 5
-
-    # ── TRENDY PENALTY (remove runaway moves)
+    # ── TREND EXTENSION PENALTY
     trend_move = (close.iloc[-30:].max() - close.iloc[-30:].min()) / close.iloc[-30:].min()
     if trend_move > 0.20:
         score -= 15
 
-    # ── VOLUME DRY-UP
+    # ── VOLUME
     vols = volume.iloc[-60:]
     if vols.iloc[30:].mean() < vols.iloc[:30].mean():
-        tightness_score += 8
+        tightness += 8
 
-    # ── FINAL SCORE (STRUCTURE DOMINATES)
-    final_score = (score * 0.4) + (tightness_score * 2.0)
+    final_score = (score * 0.4) + (tightness * 2.0)
 
     return {
         "Ticker": ticker,
@@ -229,7 +212,7 @@ def score_stock(ticker, sector):
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (STRUCTURE + ATR + CANDLE COMPRESSION)\n")
+    print("\n🎯 VCP SNIPER (EMA STRUCTURE + TRUE VCP LOGIC)\n")
 
     if not os.path.exists("active_sectors.json"):
         print("❌ active_sectors.json missing")
