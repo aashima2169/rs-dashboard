@@ -32,6 +32,7 @@ def get_stocks(sector_key: str) -> list:
 
         official_name = config.get("nse_index_mapping", {}).get(sector_key)
         if not official_name:
+            print(f"⚠️ No NSE mapping for: {sector_key}")
             return []
 
         headers = {
@@ -43,15 +44,32 @@ def get_stocks(sector_key: str) -> list:
         session.get("https://www.nseindia.com", headers=headers, timeout=10)
 
         url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
-
         resp = session.get(url, headers=headers, timeout=10)
+
         if resp.status_code != 200:
+            print(f"❌ NSE API {resp.status_code} for {sector_key}")
             return []
 
         data = resp.json()
-        return [f"{s['symbol']}.NS" for s in data["data"] if s.get("symbol")]
 
-    except:
+        stocks = []
+        for s in data.get("data", []):
+            symbol = s.get("symbol", "").strip()
+
+            # 🔥 CORE FIX
+            if not symbol:
+                continue
+
+            # Skip index rows (they always start with NIFTY)
+            if symbol.upper().startswith("NIFTY"):
+                continue
+
+            stocks.append(f"{symbol}.NS")
+
+        return stocks
+
+    except Exception as e:
+        print(f"❌ NSE Error ({sector_key}): {e}")
         return []
 
 
