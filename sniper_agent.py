@@ -1,141 +1,33 @@
-import os
-import json
-import time
-import warnings
-import logging
-
-import numpy as np
-import pandas as pd
-import requests
 import yfinance as yf
+import pandas as pd
+import numpy as np
 
-warnings.simplefilter(action="ignore", category=FutureWarning)
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+# =========================
+# CONFIG
+# =========================
+TICKERS = []  # <-- your ticker list here
 
-CFG = {
-    "top_n": 30,
-    "sleep": 0.03,
-}
-
-# ─────────────────────────────────────────
-# DATA
-# ─────────────────────────────────────────
-def download(ticker):
-    try:
-        df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
-        if df.empty:
-            return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        return df.dropna()
-    except:
-        return None
-
-
-def get_stocks(sector):
-    try:
-        with open("config.json") as f:
-            cfg = json.load(f)
-
-        name = cfg["nse_index_mapping"].get(sector)
-        if not name:
-            return []
-
-        session = requests.Session()
-        headers = {"User-Agent": "Mozilla/5.0"}
-
-        session.get("https://www.nseindia.com", headers=headers)
-
-        url = f"https://www.nseindia.com/api/equity-stockIndices?index={name.replace(' ', '%20')}"
-        res = session.get(url, headers=headers)
-
-        return [
-            f"{x['symbol']}.NS"
-            for x in res.json()["data"]
-            if x["symbol"] != name
-        ]
-
-    except:
-        return []
-
-
-# ─────────────────────────────────────────
+# =========================
 # HELPERS
-# ─────────────────────────────────────────
-def compute_atr(df):
-    tr = pd.concat([
-        df["High"] - df["Low"],
-        (df["High"] - df["Close"].shift()).abs(),
-        (df["Low"] - df["Close"].shift()).abs()
-    ], axis=1).max(axis=1)
-
-    return tr.rolling(14).mean()
-
-
-# ─────────────────────────────────────────
-# CORE LOGIC
-# ─────────────────────────────────────────
-def score_stock(ticker, sector):
-    df = download(ticker)
-    if df is None or len(df) < 200:
-        return None
-
+# =========================
+def compute_atr(df, period=14):
+    high = df["High"]
+    low = df["Low"]
     close = df["Close"]
-    volume = df["Volume"]
 
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
+    return atr
+
+
+def compute_structure_score(base_close, recent_close):
     score = 0
 
-    # ── EMA STRUCTURE (HARD)
-    ema21 = close.ewm(span=21).mean()
-    ema50 = close.ewm(span=50).mean()
-    ema100 = close.ewm(span=100).mean()
-
-    if not (ema21.iloc[-1] > ema50.iloc[-1] > ema100.iloc[-1]):
-        return None
-
-    # ── BASE
-    base = df.iloc[-60:]
-    base_close = base["Close"]
-
-    base_range = (base_close.max() - base_close.min()) / base_close.max()
-    if base_range > 0.35:
-        return None
-
-    # ── RIGHT SIDE
-    recent = base.iloc[-12:]
-    recent_close = recent["Close"]
-
-    recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
-
-    # 🔥 STRONG REWARD
-    if recent_range < 0.04:
-        score += 50
-    elif recent_range < 0.08:
-        score += 30
-    elif recent_range < 0.12:
-        score += 10
-    else:
-        score -= 20
-
-    # ── SIDEWAYS (NEW)
-    std_dev = recent_close.pct_change().std()
-    if std_dev < 0.01:
-        score += 25
-
-    # ── CANDLE TIGHTNESS
-    bodies = (recent["Close"] - recent["Open"]).abs()
-    ranges = (recent["High"] - recent["Low"])
-
-    body_ratio = (bodies / ranges).mean()
-
-    if body_ratio < 0.4:
-        score += 20
-    elif body_ratio < 0.6:
-        score += 10
-    else:
-        score -= 15
-
-    # ── RANGE CONTRACTION
+    # Split into contraction legs
     seg1 = base_close.iloc[:20]
     seg2 = base_close.iloc[20:40]
     seg3 = base_close.iloc[40:]
@@ -144,81 +36,143 @@ def score_stock(ticker, sector):
     r2 = (seg2.max() - seg2.min()) / seg2.max()
     r3 = (seg3.max() - seg3.min()) / seg3.max()
 
+    # Multi-leg contraction
     if r3 < r2 < r1:
-        score += 30
+        score += 40
     elif r3 < r2:
-        score += 10
-
-    # ── ATR
-    atr = compute_atr(df)
-    atr_ratio = atr.iloc[-12:].mean() / atr.iloc[-60:].mean()
-
-    if atr_ratio < 0.7:
         score += 20
-    elif atr_ratio < 0.9:
+
+    # Tight right side
+    recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
+
+    if recent_range < 0.04:
+        score += 40
+    elif recent_range < 0.08:
+        score += 25
+    elif recent_range < 0.12:
         score += 10
+    else:
+        score -= 30
 
-    # ── VOLUME
-    vols = volume.iloc[-60:]
-    if vols.iloc[30:].mean() < vols.iloc[:30].mean():
-        score += 10
+    # Sideways behavior (very important)
+    std_dev = recent_close.pct_change().std()
 
-    # ── TREND KILLER (VERY IMPORTANT)
-    trend = (recent_close.iloc[-1] - recent_close.iloc[0]) / recent_close.iloc[0]
-
-    if trend > 0.08:
-        score -= 40
-
-    # ── POST BREAKOUT PENALTY
-    if close.iloc[-1] > recent_close.max() * 1.03:
+    if std_dev < 0.01:
+        score += 30
+    elif std_dev < 0.015:
+        score += 15
+    else:
         score -= 20
 
-    return {
-        "Ticker": ticker,
-        "Sector": sector,
-        "Score": round(score, 2),
-        "Price": round(close.iloc[-1], 2),
-    }
+    return score
 
 
-# ─────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────
-def run():
-    print("\n🎯 VCP SNIPER (FINAL RANKING MODE)\n")
+def is_valid_trend(df):
+    ema21 = df["Close"].ewm(span=21).mean().iloc[-1]
+    ema50 = df["Close"].ewm(span=50).mean().iloc[-1]
+    ema100 = df["Close"].ewm(span=100).mean().iloc[-1]
 
-    with open("active_sectors.json") as f:
-        sectors = json.load(f)
-
-    results = []
-
-    for sector in sectors:
-        tickers = get_stocks(sector)
-        print(f"Scanning {sector} ({len(tickers)})")
-
-        for t in tickers:
-            res = score_stock(t, sector)
-            if res:
-                results.append(res)
-
-            time.sleep(CFG["sleep"])
-
-    if not results:
-        print("\n❌ No candidates")
-        return
-
-    df = pd.DataFrame(results)
-
-    df = df.sort_values("Score", ascending=False)
-    df = df.drop_duplicates(subset=["Ticker"])
-
-    df = df.head(CFG["top_n"])
-
-    df.to_csv("sniper_candidates.csv", index=False)
-
-    print("\n🏆 TOP VCP-LIKE CANDIDATES\n")
-    print(df.to_string(index=False))
+    return ema21 > ema50 > ema100
 
 
-if __name__ == "__main__":
-    run()
+# =========================
+# MAIN SCANNER
+# =========================
+results = []
+
+for ticker in TICKERS:
+    try:
+        df = yf.download(ticker, period="1y", interval="1wk", progress=False)
+
+        if len(df) < 70:
+            continue
+
+        close = df["Close"]
+        volume = df["Volume"]
+
+        # EMA TREND FILTER (mandatory)
+        if not is_valid_trend(df):
+            continue
+
+        base = df.iloc[-60:]
+        recent = base.iloc[-12:]
+
+        base_close = base["Close"]
+        recent_close = recent["Close"]
+
+        # =========================
+        # STRUCTURE SCORE
+        # =========================
+        structure_score = compute_structure_score(base_close, recent_close)
+
+        # =========================
+        # QUALITY SCORE
+        # =========================
+        quality_score = 0
+
+        # Candle compression
+        bodies = (recent["Close"] - recent["Open"]).abs()
+        ranges = (recent["High"] - recent["Low"])
+        body_ratio = (bodies / ranges).mean()
+
+        if body_ratio < 0.4:
+            quality_score += 20
+        elif body_ratio < 0.6:
+            quality_score += 10
+        else:
+            quality_score -= 10
+
+        # ATR contraction
+        atr = compute_atr(df)
+        atr_ratio = atr.iloc[-12:].mean() / atr.iloc[-60:].mean()
+
+        if atr_ratio < 0.7:
+            quality_score += 20
+        elif atr_ratio < 0.9:
+            quality_score += 10
+
+        # Volume contraction
+        vols = volume.iloc[-60:]
+        if vols.iloc[30:].mean() < vols.iloc[:30].mean():
+            quality_score += 10
+
+        # =========================
+        # TREND PENALTY (kill runners)
+        # =========================
+        trend = (close.iloc[-1] - close.iloc[-12]) / close.iloc[-12]
+
+        if trend > 0.06:
+            quality_score -= 60
+
+        # =========================
+        # BREAKOUT FILTER (already moved stocks)
+        # =========================
+        if close.iloc[-1] > recent_close.max() * 1.025:
+            quality_score -= 30
+
+        # =========================
+        # FINAL SCORE (structure dominates)
+        # =========================
+        score = structure_score * 2 + quality_score
+
+        if score > 30:
+            results.append({
+                "Ticker": ticker,
+                "Score": round(score, 2),
+                "Price": round(close.iloc[-1], 2)
+            })
+
+    except:
+        continue
+
+
+# =========================
+# OUTPUT
+# =========================
+results = sorted(results, key=lambda x: x["Score"], reverse=True)
+
+print("\n🏆 TOP VCP-LIKE CANDIDATES\n")
+print(f"{'Ticker':<15} {'Score':<10} {'Price':<10}")
+
+for r in results:
+    print(f"{r['Ticker']:<15} {r['Score']:<10} {r['Price']:<10}")
