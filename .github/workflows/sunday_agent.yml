@@ -23,16 +23,15 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # Added nsepython and scipy (nsepython requirement) here
           pip install requests pandas yfinance nsepython scipy
 
       - name: Run Sequential Agent Pipeline
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-          # Step 1: Execute Scout
+        run: |
+          # 1. Run Scout first to generate active_sectors.json
           python agent.py
           
-          # Step 2: Execute Sniper
+          # 2. Run Sniper second to scan stocks in those sectors
           python sniper_agent.py
