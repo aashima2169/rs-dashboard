@@ -17,9 +17,9 @@ CFG = {
     "sleep": 0.03,
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # DATA
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 def download(ticker):
     try:
         df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
@@ -59,35 +59,22 @@ def get_stocks(sector):
         return []
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-def compute_atr(df, period=14):
-    high = df["High"]
-    low = df["Low"]
-    close = df["Close"]
+# ─────────────────────────────────────────
+def compute_atr(df):
+    tr = pd.concat([
+        df["High"] - df["Low"],
+        (df["High"] - df["Close"].shift()).abs(),
+        (df["Low"] - df["Close"].shift()).abs()
+    ], axis=1).max(axis=1)
 
-    tr1 = high - low
-    tr2 = (high - close.shift()).abs()
-    tr3 = (low - close.shift()).abs()
-
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(period).mean()
-
-    return atr
+    return tr.rolling(14).mean()
 
 
-def candle_body(df):
-    return (df["Close"] - df["Open"]).abs()
-
-
-def candle_range(df):
-    return df["High"] - df["Low"]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SCORING
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# CORE LOGIC
+# ─────────────────────────────────────────
 def score_stock(ticker, sector):
     df = download(ticker)
     if df is None or len(df) < 200:
@@ -99,7 +86,7 @@ def score_stock(ticker, sector):
     score = 0
     tightness = 0
 
-    # ── EMA STRUCTURE (STRICT FILTER)
+    # ── EMA STRUCTURE
     ema21 = close.ewm(span=21).mean()
     ema50 = close.ewm(span=50).mean()
     ema100 = close.ewm(span=100).mean()
@@ -110,47 +97,37 @@ def score_stock(ticker, sector):
     if close.iloc[-1] < ema21.iloc[-1]:
         return None
 
-    # slope check (important)
-    if ema21.iloc[-1] <= ema21.iloc[-5]:
-        score -= 5
-
-    # ── PRIOR MOVE
-    move = (close.iloc[-150:].max() - close.iloc[-150:].min()) / close.iloc[-150:].min()
-    score += min(8, move * 8)
-
     # ── BASE
     base = df.iloc[-60:]
     base_close = base["Close"]
 
     base_range = (base_close.max() - base_close.min()) / base_close.max()
+
     if base_range > 0.30:
         return None
 
-    # ── BASE TIGHTNESS
-    if base_range < 0.08:
-        tightness += 20
-    elif base_range < 0.12:
-        tightness += 15
-    elif base_range < 0.18:
-        tightness += 8
-
-    # ── RIGHT SIDE
-    recent = base.iloc[-15:]
+    # ── RIGHT SIDE (STRICT)
+    recent = base.iloc[-12:]
     recent_close = recent["Close"]
 
     recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
 
-    if recent_range < 0.05:
-        tightness += 20
-    elif recent_range < 0.08:
-        tightness += 15
-    elif recent_range < 0.12:
-        tightness += 5
-    else:
-        tightness -= 10
+    # HARD FILTER → this is key
+    if recent_range > 0.10:
+        return None
 
-    if recent_range > 0.15:
-        score -= 15
+    # reward tightness
+    if recent_range < 0.04:
+        tightness += 30
+    elif recent_range < 0.07:
+        tightness += 20
+    else:
+        tightness += 10
+
+    # ── KILL TRENDY RIGHT SIDE
+    recent_trend = (recent_close.iloc[-1] - recent_close.iloc[0]) / recent_close.iloc[0]
+    if recent_trend > 0.08:
+        score -= 20
 
     # ── RANGE CONTRACTION
     seg1 = base_close.iloc[:20]
@@ -162,43 +139,27 @@ def score_stock(ticker, sector):
     r3 = (seg3.max() - seg3.min()) / seg3.max()
 
     if r3 < r2 < r1:
-        tightness += 20
+        tightness += 25
     else:
         score -= 10
 
     # ── ATR CONTRACTION
     atr = compute_atr(df)
-    atr_ratio = atr.iloc[-15:].mean() / atr.iloc[-60:].mean()
+    atr_ratio = atr.iloc[-12:].mean() / atr.iloc[-60:].mean()
 
-    if atr_ratio < 0.6:
-        tightness += 15
-    elif atr_ratio < 0.8:
+    if atr_ratio < 0.7:
+        tightness += 20
+    elif atr_ratio < 0.9:
         tightness += 10
-    elif atr_ratio < 1.0:
-        tightness += 5
     else:
-        score -= 8
+        score -= 10
 
-    # ── CANDLE COMPRESSION
-    body = candle_body(base)
-    rng = candle_range(base)
-
-    if body.iloc[-15:].mean() < body.iloc[:45].mean() * 0.7:
-        tightness += 10
-    if rng.iloc[-15:].mean() < rng.iloc[:45].mean() * 0.7:
-        tightness += 10
-
-    # ── TREND EXTENSION PENALTY
-    trend_move = (close.iloc[-30:].max() - close.iloc[-30:].min()) / close.iloc[-30:].min()
-    if trend_move > 0.20:
-        score -= 15
-
-    # ── VOLUME
+    # ── VOLUME DRY-UP
     vols = volume.iloc[-60:]
     if vols.iloc[30:].mean() < vols.iloc[:30].mean():
-        tightness += 8
+        tightness += 10
 
-    final_score = (score * 0.4) + (tightness * 2.0)
+    final_score = tightness + score
 
     return {
         "Ticker": ticker,
@@ -208,15 +169,11 @@ def score_stock(ticker, sector):
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # MAIN
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (EMA STRUCTURE + TRUE VCP LOGIC)\n")
-
-    if not os.path.exists("active_sectors.json"):
-        print("❌ active_sectors.json missing")
-        return
+    print("\n🎯 VCP SNIPER (CLEAN STRUCTURE MODE)\n")
 
     with open("active_sectors.json") as f:
         sectors = json.load(f)
@@ -239,7 +196,12 @@ def run():
         return
 
     df = pd.DataFrame(results)
-    df = df.sort_values(by="Score", ascending=False).head(CFG["top_n"])
+
+    # ── REMOVE DUPLICATES (CRITICAL FIX)
+    df = df.sort_values("Score", ascending=False)
+    df = df.drop_duplicates(subset=["Ticker"])
+
+    df = df.head(CFG["top_n"])
 
     df.to_csv("sniper_candidates.csv", index=False)
 
