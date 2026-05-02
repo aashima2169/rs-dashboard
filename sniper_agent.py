@@ -9,47 +9,22 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID        = os.environ.get("TELEGRAM_CHAT_ID")
 
-# ─────────────────────────────────────────────────────────
-# FINAL CONFIG (TUNED FOR REAL VCP)
-# ─────────────────────────────────────────────────────────
 CFG = {
-    "min_pole_pct":           15,
-    "max_pole_pct":           45,
-
-    "pole_trough_window":     30,
-    "pole_lookback_days":    130,
-    "pole_exclude_recent":    20,
-
-    "vcp_base_days":          60,
-    "min_base_bars":          18,
-
-    "min_base_depth_pct":      5,
-    "max_base_depth_pct":     22,
-
-    "base_tightening_ratio":  0.65,
-    "vol_contraction_ratio":  0.85,
-
-    "near_high_threshold":    0.88,
-    "min_contraction_ratio":  0.60,
+    "min_pole_pct": 15,
+    "max_pole_pct": 45,
+    "pole_trough_window": 30,
+    "pole_lookback_days": 130,
+    "pole_exclude_recent": 20,
+    "vcp_base_days": 60,
+    "min_base_bars": 18,
+    "min_base_depth_pct": 5,
+    "max_base_depth_pct": 22,
+    "base_tightening_ratio": 0.65,
+    "vol_contraction_ratio": 0.85,
+    "near_high_threshold": 0.88,
+    "min_contraction_ratio": 0.60,
 }
 
-FILTERS = [
-    "F1_EMA_Trend",
-    "F2_Pole_Size",
-    "F3_Base_Formed",
-    "F4_Contraction",
-    "F4b_Base_Tightening",
-    "F4c_ATR_Contraction",
-    "F4d_Candle_Compression",
-    "F5a_Base_Depth_Min",
-    "F5b_Base_Depth_Max",
-    "F6_Volume_Dryup",
-    "F7_Near_Breakout",
-]
-
-# ─────────────────────────────────────────────────────────
-# NSE STOCK FETCH (YOUR FUNCTION - SAFE WRAP)
-# ─────────────────────────────────────────────────────────
 def get_stocks(sector_key: str) -> list:
     try:
         with open("config.json", "r") as f:
@@ -57,7 +32,6 @@ def get_stocks(sector_key: str) -> list:
 
         official_name = config.get("nse_index_mapping", {}).get(sector_key)
         if not official_name:
-            print(f"  ⚠️  No NSE mapping for: {sector_key}")
             return []
 
         headers = {
@@ -70,40 +44,17 @@ def get_stocks(sector_key: str) -> list:
 
         url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
 
-        for _ in range(3):  # retry
-            resp = session.get(url, headers=headers, timeout=10)
+        resp = session.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return []
 
-            if resp.status_code != 200:
-                time.sleep(1)
-                continue
+        data = resp.json()
+        return [f"{s['symbol']}.NS" for s in data["data"] if s.get("symbol")]
 
-            try:
-                data = resp.json()
-            except:
-                time.sleep(1)
-                continue
-
-            if "data" not in data:
-                time.sleep(1)
-                continue
-
-            return [
-                f"{s['symbol']}.NS"
-                for s in data["data"]
-                if s.get("symbol") and s["symbol"] != official_name
-            ][:30]
-
-        print(f"  ⚠️ NSE blocked: {sector_key}")
-        return []
-
-    except Exception as e:
-        print(f"  ❌ NSE Error ({sector_key}): {e}")
+    except:
         return []
 
 
-# ─────────────────────────────────────────────────────────
-# CORE VCP DETECTION
-# ─────────────────────────────────────────────────────────
 def detect_vcp(ticker, sector, cfg, filter_fails):
     try:
         df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
@@ -121,16 +72,16 @@ def detect_vcp(ticker, sector, cfg, filter_fails):
         cmp = float(close.iloc[-1])
 
         # ── F1 TREND ──
-        ema21  = close.ewm(span=21).mean().iloc[-1]
-        ema50  = close.ewm(span=50).mean().iloc[-1]
-        ema200 = close.ewm(span=200).mean().iloc[-1]
+        ema21  = float(close.ewm(span=21).mean().iloc[-1])
+        ema50  = float(close.ewm(span=50).mean().iloc[-1])
+        ema200 = float(close.ewm(span=200).mean().iloc[-1])
 
-      trend_ok = ema21 > ema50 > ema200
-price_ok = cmp > ema50
+        trend_ok = ema21 > ema50 > ema200
+        price_ok = cmp > ema50
 
-if not (trend_ok and price_ok):
-    filter_fails["F1_EMA_Trend"] += 1
-    return None
+        if not (trend_ok and price_ok):
+            filter_fails["F1_EMA_Trend"] += 1
+            return None
 
         # ── POLE ──
         exclude = cfg["pole_exclude_recent"]
@@ -180,7 +131,7 @@ if not (trend_ok and price_ok):
             filter_fails["F4c_ATR_Contraction"] += 1
             return None
 
-        # ── CANDLE COMPRESSION (RIGHT SIDE FIX) ──
+        # ── CANDLE COMPRESSION ──
         if ((high.tail(5)-low.tail(5)).mean() /
             (high.tail(30)-low.tail(30)).mean()) > 0.6:
             filter_fails["F4d_Candle_Compression"] += 1
@@ -217,9 +168,6 @@ if not (trend_ok and price_ok):
         return None
 
 
-# ─────────────────────────────────────────────────────────
-# RUNNER
-# ─────────────────────────────────────────────────────────
 def run_sniper():
     print("\n🎯 VCP SNIPER (FINAL)\n")
 
