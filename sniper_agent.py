@@ -149,12 +149,13 @@ def check_vcp_contraction(base):
     if len(contractions) < 2:
         return False
 
-    valid = 0
-    for i in range(len(contractions) - 1):
-        if contractions[i + 1] <= contractions[i] * 0.8:
-            valid += 1
+    improving = 0
 
-    return valid >= len(contractions) - 2
+    for i in range(len(contractions) - 1):
+        if contractions[i + 1] <= contractions[i] * 1.1:
+            improving += 1
+
+    return improving >= len(contractions) // 2
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -203,11 +204,11 @@ def detect_vcp(ticker, sector, nifty_df):
     if len(base) < CFG["min_base_bars"]:
         return None, "F3_BASE"
 
-    # TRUE VCP CONTRACTION
+    # VCP contraction
     if not check_vcp_contraction(base):
         return None, "F4_SWING"
 
-    # RANGE COMPRESSION
+    # RANGE COMPRESSION (RELAXED)
     segments = np.array_split(base, 3)
     ranges = []
 
@@ -217,7 +218,7 @@ def detect_vcp(ticker, sector, nifty_df):
         r = (seg.max() - seg.min()) / seg.max()
         ranges.append(r)
 
-    if not (ranges[0] > ranges[1] > ranges[2]):
+    if not (ranges[2] < ranges[0] * 0.8):
         return None, "F4_SWING"
 
     # DEPTH
