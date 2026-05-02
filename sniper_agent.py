@@ -13,7 +13,7 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 CFG = {
-    "top_n": 30,
+    "top_n": 25,
     "sleep": 0.03,
 }
 
@@ -84,7 +84,6 @@ def score_stock(ticker, sector):
     volume = df["Volume"]
 
     score = 0
-    tightness = 0
 
     # ── EMA STRUCTURE
     ema21 = close.ewm(span=21).mean()
@@ -102,34 +101,29 @@ def score_stock(ticker, sector):
     base_close = base["Close"]
 
     base_range = (base_close.max() - base_close.min()) / base_close.max()
-
     if base_range > 0.30:
         return None
 
-    # ── RIGHT SIDE (STRICT)
+    # ── RIGHT SIDE STRICT CONSOLIDATION
     recent = base.iloc[-12:]
     recent_close = recent["Close"]
 
     recent_range = (recent_close.max() - recent_close.min()) / recent_close.max()
-
-    # HARD FILTER → this is key
-    if recent_range > 0.10:
+    if recent_range > 0.08:
         return None
 
-    # reward tightness
-    if recent_range < 0.04:
-        tightness += 30
-    elif recent_range < 0.07:
-        tightness += 20
+    # ── CANDLE TIGHTNESS (NEW)
+    bodies = (recent["Close"] - recent["Open"]).abs()
+    ranges = (recent["High"] - recent["Low"])
+
+    body_ratio = (bodies / ranges).mean()
+
+    if body_ratio > 0.6:  # big bodies → trending
+        return None
     else:
-        tightness += 10
+        score += 20
 
-    # ── KILL TRENDY RIGHT SIDE
-    recent_trend = (recent_close.iloc[-1] - recent_close.iloc[0]) / recent_close.iloc[0]
-    if recent_trend > 0.08:
-        score -= 20
-
-    # ── RANGE CONTRACTION
+    # ── SWING CONTRACTION (MOST IMPORTANT)
     seg1 = base_close.iloc[:20]
     seg2 = base_close.iloc[20:40]
     seg3 = base_close.iloc[40:]
@@ -138,33 +132,34 @@ def score_stock(ticker, sector):
     r2 = (seg2.max() - seg2.min()) / seg2.max()
     r3 = (seg3.max() - seg3.min()) / seg3.max()
 
-    if r3 < r2 < r1:
-        tightness += 25
-    else:
-        score -= 10
+    if not (r3 < r2 < r1):
+        return None
+
+    score += 30
 
     # ── ATR CONTRACTION
     atr = compute_atr(df)
     atr_ratio = atr.iloc[-12:].mean() / atr.iloc[-60:].mean()
 
-    if atr_ratio < 0.7:
-        tightness += 20
-    elif atr_ratio < 0.9:
-        tightness += 10
+    if atr_ratio < 0.75:
+        score += 20
     else:
-        score -= 10
+        return None
 
     # ── VOLUME DRY-UP
     vols = volume.iloc[-60:]
     if vols.iloc[30:].mean() < vols.iloc[:30].mean():
-        tightness += 10
+        score += 10
 
-    final_score = tightness + score
+    # ── KILL LINEAR TREND (NEW)
+    trend = (recent_close.iloc[-1] - recent_close.iloc[0]) / recent_close.iloc[0]
+    if trend > 0.06:
+        return None
 
     return {
         "Ticker": ticker,
         "Sector": sector,
-        "Score": round(final_score, 2),
+        "Score": round(score, 2),
         "Price": round(close.iloc[-1], 2),
     }
 
@@ -173,7 +168,7 @@ def score_stock(ticker, sector):
 # MAIN
 # ─────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (CLEAN STRUCTURE MODE)\n")
+    print("\n🎯 VCP SNIPER (STRUCTURE-FIRST MODE)\n")
 
     with open("active_sectors.json") as f:
         sectors = json.load(f)
@@ -197,7 +192,7 @@ def run():
 
     df = pd.DataFrame(results)
 
-    # ── REMOVE DUPLICATES (CRITICAL FIX)
+    # REMOVE DUPLICATES
     df = df.sort_values("Score", ascending=False)
     df = df.drop_duplicates(subset=["Ticker"])
 
