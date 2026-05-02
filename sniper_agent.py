@@ -8,67 +8,28 @@ import yfinance as yf
 # ==============================
 # NSE STOCK FETCH (DYNAMIC)
 # ==============================
-def get_stocks(sector_key: str) -> list:
+def get_stocks(sector_key):
     try:
-        import json, requests, time
-
         with open("config.json", "r") as f:
             config = json.load(f)
 
-        official_name = config.get("nse_index_mapping", {}).get(sector_key)
+        official_name = config["nse_index_mapping"].get(sector_key)
         if not official_name:
-            print(f"  ⚠️  No NSE mapping for: {sector_key}")
             return []
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.nseindia.com/",
-            "Connection": "keep-alive",
-        }
-
         session = requests.Session()
+        headers = {"User-Agent": "Mozilla/5.0"}
 
-        # 🔑 Step 1: Cookie handshake (MANDATORY)
-        session.get("https://www.nseindia.com", headers=headers, timeout=10)
+        session.get("https://www.nseindia.com", headers=headers)
 
         url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
+        resp = session.get(url, headers=headers)
 
-        # 🔁 Step 2: Retry logic (critical for GitHub Actions)
-        for _ in range(3):
-            resp = session.get(url, headers=headers, timeout=10)
+        return [f"{x['symbol']}.NS" for x in resp.json()["data"] if x["symbol"] != official_name]
 
-            if resp.status_code != 200:
-                time.sleep(1)
-                continue
-
-            try:
-                data = resp.json()
-            except:
-                time.sleep(1)
-                continue
-
-            # ✅ Critical fix (your current bug)
-            if "data" not in data:
-                time.sleep(1)
-                continue
-
-            tickers = [
-                f"{s['symbol']}.NS"
-                for s in data["data"]
-                if s.get("symbol") and s["symbol"] != official_name
-            ]
-
-            if tickers:
-                return tickers[:30]  # keep universe clean
-
-        print(f"  ⚠️ NSE blocked / empty response for {sector_key}")
+    except:
         return []
 
-    except Exception as e:
-        print(f"  ❌ NSE Error ({sector_key}): {e}")
-        return []
 
 # ==============================
 # VCP SCORE FUNCTION
