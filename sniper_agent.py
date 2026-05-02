@@ -9,13 +9,11 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def get_stocks(sector_key):
-    """Dynamic NSE fetch with robust headers to prevent '0 tickers' error."""
     try:
         with open('config.json', 'r') as f:
             config = json.load(f)
         official_name = config.get("nse_index_mapping", {}).get(sector_key)
         
-        # Enhanced headers to mimic a real browser
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://www.nseindia.com/"
@@ -38,7 +36,7 @@ def send_telegram_file(file_path):
     except: pass
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: IMPROVED EMA & VOLUME SCAN ---")
+    print("\n🎯 --- SNIPER MISSION: 6-CANDLE CONSOLIDATION SCAN ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
@@ -50,7 +48,6 @@ def run_sniper():
         
         for t in tickers:
             try:
-                # Use 1y data for stable EMA calculations
                 df = yf.download(t, period="1y", progress=False, auto_adjust=True)
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
@@ -59,56 +56,59 @@ def run_sniper():
                 
                 close = df['Close'].dropna()
                 volume = df['Volume'].dropna()
+                high = df['High'].dropna()
+                low = df['Low'].dropna()
                 
-                # --- EMA LOGIC (10 > 21 > 50) ---
+                # --- EMA LOGIC ---
                 cmp = round(float(close.iloc[-1]), 2)
                 ema10 = round(close.ewm(span=10).mean().iloc[-1], 2)
                 ema21 = round(close.ewm(span=21).mean().iloc[-1], 2)
                 ema50 = round(close.ewm(span=50).mean().iloc[-1], 2)
+                dist_ema21 = round(((cmp - ema21) / ema21) * 100, 2)
                 
                 # --- VOLUME LOGIC (VDU) ---
                 avg_vol_20 = volume.rolling(20).mean().iloc[-1]
                 curr_vol_3 = volume.tail(3).mean()
                 vdu_ratio = round(curr_vol_3 / avg_vol_20, 2)
                 
-                # --- TIGHTNESS & DISTANCE ---
-                dist_ema21 = round(((cmp - ema21) / ema21) * 100, 2)
+                # --- STRICT 6-DAY CONSOLIDATION LOGIC ---
+                # Find the max high and min low of the last 6 candles
+                recent_high = high.tail(6).max()
+                recent_low = low.tail(6).min()
                 
-                h10, l10 = df['High'].tail(10).max(), df['Low'].tail(10).min()
-                h30, l30 = df['High'].iloc[-40:-10].max(), df['Low'].iloc[-40:-10].min()
-                tightness = round(float((h10 - l10) / ((h30 - l30) if (h30-l30) != 0 else 1.0)), 2)
+                # Calculate the total % range of those 6 days
+                consol_range_pct = round(((recent_high - recent_low) / recent_low) * 100, 2)
 
                 # --- IMPROVED FILTERS ---
-                # 1. EMA Stack: Must be in a strong uptrend
-                # 2. Dist < 5%: Not overextended from the 21 EMA
-                # 3. Tightness < 1.35: Price is contracting
-                # 4. Volume < 1.1: Volume is not spiking (Dry-up check)
-                if ema10 > ema21 > ema50 and cmp > ema50 and dist_ema21 < 5.0 and tightness < 1.35 and vdu_ratio < 1.1:
+                # 1. EMA Stack: 10 > 21 > 50 and Price > 50
+                # 2. Dist < 5%: Not overextended
+                # 3. Consolidation < 4.5%: The last 6 candles must be trapped in a tight 4.5% box
+                # 4. Volume < 1.1: Volume is drying up
+                if ema10 > ema21 > ema50 and cmp > ema50 and dist_ema21 < 5.0 and consol_range_pct <= 4.5 and vdu_ratio < 1.1:
                     all_data.append({
                         "Ticker": t, "Sector": sector, "CMP": cmp,
                         "EMA10": ema10, "EMA21": ema21, "EMA50": ema50,
-                        "VDU": vdu_ratio, "Tightness": tightness,
+                        "VDU": vdu_ratio, "Consol_%": consol_range_pct,
                         "Dist_21_%": dist_ema21
                     })
             except: continue
             time.sleep(0.05)
 
     if all_data:
-        # Sort by VDU (lowest volume dry-up first)
-        all_data = sorted(all_data, key=lambda x: x['VDU'])
+        # Sort by the tightest consolidation first
+        all_data = sorted(all_data, key=lambda x: x['Consol_%'])
         
         filename = "sniper_candidates.csv"
         pd.DataFrame(all_data).to_csv(filename, index=False)
         send_telegram_file(filename)
         
-        msg = "🎯 **SNIPER ELITE: EMA + VOLUME**\n"
-        msg += "`TICKER   CMP      VDU    TIGHT` \n"
+        msg = "🎯 **SNIPER ELITE: TIGHT CONSOLIDATION**\n"
+        msg += "`TICKER   CMP      VDU    RANGE%` \n"
         for c in all_data[:12]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU']).ljust(6)} {str(c['Tightness']).ljust(5)}` \n"
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VDU']).ljust(6)} {str(c['Consol_%']).ljust(5)}` \n"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
-        # Create an empty file to prevent GitHub Action from breaking
         pd.DataFrame(columns=["Ticker"]).to_csv("sniper_candidates.csv", index=False)
         print("ℹ️ No matches found today.")
 
