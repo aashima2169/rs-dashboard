@@ -4,7 +4,6 @@ import yfinance as yf
 import numpy as np
 import warnings
 
-# Suppress warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -33,7 +32,7 @@ def send_telegram_file(file_path):
     except: pass
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: VCP & STAGE 2 LOGIC ---")
+    print("\n🎯 --- SNIPER MISSION: MINERVINI VCP SCAN ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
@@ -42,87 +41,71 @@ def run_sniper():
     
     for sector in active_sectors:
         tickers = get_stocks(sector)
-        print(f"📂 Sector [{sector}]: Screening {len(tickers)} tickers...")
+        print(f"📂 Sector [{sector}]: Screening...")
         
         for t in tickers:
             try:
-                # Need at least 200 days for Stage 2 Trend Check
-                df = yf.download(t, period="1y", progress=False, auto_adjust=True)
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
+                df = yf.download(t, period="2y", progress=False, auto_adjust=True)
+                if df.empty or len(df) < 250: continue
                 
-                if df.empty or len(df) < 200: continue
-                
-                close = df['Close'].dropna()
-                highs = df['High'].dropna()
-                lows = df['Low'].dropna()
-                volume = df['Volume'].dropna()
-                
+                close = df['Close']
+                volume = df['Volume']
                 cmp = float(close.iloc[-1])
-                ema10 = close.ewm(span=10).mean().iloc[-1]
-                ema20 = close.ewm(span=20).mean().iloc[-1]
-                ema50 = close.ewm(span=50).mean().iloc[-1]
-                sma200 = close.rolling(window=200).mean().iloc[-1]
                 
-                # --- 1. STAGE 2 STRUCTURAL FILTER ---
-                # Price must be above 200 SMA, and 200 SMA must be trending up
-                is_stage2 = cmp > sma200 and sma200 > sma200 * 0.98 # Not declining
-                # Standard Trend Stack
-                is_trending = cmp > ema10 > ema20 > ema50
+                # --- 1. MINERVINI TREND TEMPLATE (STAGE 2) ---
+                sma50 = close.rolling(50).mean().iloc[-1]
+                sma150 = close.rolling(150).mean().iloc[-1]
+                sma200 = close.rolling(200).mean().iloc[-1]
+                low_52 = close.tail(252).min()
+                high_52 = close.tail(252).max()
                 
-                if not (is_stage2 and is_trending):
+                # Structural Rules
+                r1 = cmp > sma150 and cmp > sma200
+                r2 = sma150 > sma200
+                r3 = sma200 > close.rolling(200).mean().iloc[-22]
+                r4 = sma50 > sma150 and sma50 > sma200
+                r5 = cmp > sma50
+                r6 = cmp >= (high_52 * 0.75) # Within 25% of 52-week high
+                r7 = cmp >= (low_52 * 1.30)  # At least 30% above 52-week low
+                
+                if not (r1 and r2 and r3 and r4 and r5 and r6 and r7):
                     continue
 
-                # --- 2. VOLATILITY CONTRACTION (VCP) ---
-                # Measure the standard deviation of returns (Volatility)
-                # We want current volatility (last 10 days) to be < 60% of recent volatility (last 40 days)
-                vol_current = close.tail(10).std()
-                vol_recent = close.iloc[-40:].std()
-                vcp_ratio = round(vol_current / vol_recent, 2) if vol_recent > 0 else 1.0
+                # --- 2. VCP & VDU (THE 'CHEAT' AREA) ---
+                vcp_ratio = close.tail(10).std() / close.tail(40).std()
+                vdu_ratio = volume.tail(3).mean() / volume.rolling(20).mean().iloc[-1]
                 
-                # --- 3. VOLUME DRY-UP (VDU) ---
-                # Volume of last 3 days should be lower than 20-day average volume
-                avg_vol_20 = volume.rolling(20).mean().iloc[-1]
-                curr_vol_3 = volume.tail(3).mean()
-                vdu_ratio = round(curr_vol_3 / avg_vol_20, 2)
-                
-                # --- 4. HIGH TIGHT FLAG (HTF) CHECK ---
-                # Has the stock gained > 25% in the last 3 months? (The 'Flagpole')
-                three_month_ago_price = close.iloc[-65] # approx 65 trading days
-                three_month_gain = (cmp - three_month_ago_price) / three_month_ago_price
-                
-                # --- FINAL ELITE LOGIC ---
-                # 1. Must be Stage 2
-                # 2. Volatility must be contracting (vcp_ratio < 0.7)
-                # 3. Volume must be drying up (vdu_ratio < 0.9)
-                if vcp_ratio < 0.7 and vdu_ratio < 0.9:
-                    print(f"   💎 ELITE VCP: {t.ljust(12)} | VCP: {vcp_ratio} | VDU: {vdu_ratio}")
+                if vcp_ratio < 0.6 and vdu_ratio < 0.8:
                     all_data.append({
-                        "Ticker": t,
-                        "Sector": sector,
-                        "CMP": round(cmp, 2),
-                        "VCP_Ratio": vcp_ratio,
-                        "VDU_Ratio": vdu_ratio,
-                        "3M_Gain_%": round(three_month_gain * 100, 2),
-                        "Dist_EMA20_%": round(((cmp - ema20)/ema20)*100, 2),
-                        "Signal": "HIGH TIGHT FLAG" if three_month_gain > 0.3 else "VCP SETUP"
+                        "Ticker": t, "Sector": sector, "CMP": round(cmp, 2),
+                        "EMA10": round(close.ewm(span=10).mean().iloc[-1], 2),
+                        "EMA20": round(close.ewm(span=20).mean().iloc[-1], 2),
+                        "EMA50": round(close.ewm(span=50).mean().iloc[-1], 2),
+                        "VCP_Ratio": round(vcp_ratio, 2), 
+                        "VDU_Ratio": round(vdu_ratio, 2)
                     })
-            except Exception as e: continue
-            time.sleep(0.1)
+            except: continue
+            time.sleep(0.05)
 
+    # --- SAVE FILE (Matches YAML Path) ---
+    filename = "sniper_candidates.csv"
     if all_data:
-        filename = "sniper_elite_vcp.csv"
         pd.DataFrame(all_data).to_csv(filename, index=False)
+        print(f"✅ Created {filename} with {len(all_data)} stocks.")
+        
+        # Send to Telegram
         send_telegram_file(filename)
         
-        msg = "🎯 **SNIPER VCP & VDU REPORT**\n"
-        msg += "`TICKER   CMP      VCP    VDU    3M%` \n"
+        # Summary Message
+        msg = "🎯 **MINERVINI VCP SHORTLIST**\n`TICKER   CMP      VCP    VDU` \n"
         for c in all_data[:10]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VCP_Ratio']).ljust(6)} {str(c['VDU_Ratio']).ljust(6)} {str(c['3M_Gain_%']).ljust(5)}%` \n"
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VCP_Ratio']).ljust(6)} {str(c['VDU_Ratio']).ljust(6)}` \n"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                      json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     else:
-        print("ℹ️ No structural VCP setups found today.")
+        # Create an empty file so the YAML upload doesn't error out
+        pd.DataFrame(columns=["Ticker"]).to_csv(filename, index=False)
+        print("ℹ️ No VCP setups found. Created empty CSV.")
 
 if __name__ == "__main__":
     run_sniper()
