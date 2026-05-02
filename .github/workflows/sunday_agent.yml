@@ -36,3 +36,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python sniper_agent.py
+
+      -  name: Upload Candidate List
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniper-trading-list
+          path: sniper_candidates.csv
