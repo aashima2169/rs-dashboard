@@ -19,30 +19,23 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CONFIG (BALANCED)
+# CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 CFG = {
-    # RS (relaxed)
     "rs_threshold": 0.98,
 
-    # Pole
     "min_pole_pct": 10,
     "max_pole_pct": 70,
     "pole_lookback_days": 200,
     "pole_exclude_recent": 5,
     "pole_trough_window": 50,
 
-    # Base (relaxed)
     "vcp_base_days": 80,
     "min_base_bars": 18,
 
-    # Volume
     "vol_contraction_ratio": 0.85,
-
-    # Breakout (relaxed)
     "near_high_threshold": 0.87,
 
-    # Runtime
     "sleep": 0.03,
 }
 
@@ -132,6 +125,38 @@ def find_swings(series, window=5):
     return highs, lows
 
 
+def check_vcp_contraction(base):
+    highs, lows = find_swings(base.values)
+
+    if len(highs) < 2 or len(lows) < 2:
+        return False
+
+    highs = sorted(highs, key=lambda x: x[0])
+    lows = sorted(lows, key=lambda x: x[0])
+
+    contractions = []
+
+    for i in range(min(len(highs), len(lows)) - 1):
+        high = highs[i][1]
+        low = lows[i][1]
+
+        if high == 0:
+            continue
+
+        drop = (high - low) / high
+        contractions.append(drop)
+
+    if len(contractions) < 2:
+        return False
+
+    valid = 0
+    for i in range(len(contractions) - 1):
+        if contractions[i + 1] <= contractions[i] * 0.8:
+            valid += 1
+
+    return valid >= len(contractions) - 2
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # VCP DETECTION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -143,19 +168,19 @@ def detect_vcp(ticker, sector, nifty_df):
     close = df["Close"]
     volume = df["Volume"]
 
-    # ── RS FILTER
+    # RS
     rs = compute_rs(df, nifty_df)
     if rs < CFG["rs_threshold"]:
         return None, "RS_FAIL"
 
-    # ── TREND (RELAXED)
+    # TREND
     ema50 = close.ewm(span=50).mean().iloc[-1]
     ema200 = close.ewm(span=200).mean().iloc[-1]
 
     if not (ema50 > ema200 or close.iloc[-1] > ema50):
         return None, "F1_TREND"
 
-    # ── POLE
+    # POLE
     search = close.iloc[-(CFG["pole_lookback_days"] + 5):-5]
     if len(search) < 30:
         return None, "F2_POLE"
@@ -173,35 +198,36 @@ def detect_vcp(ticker, sector, nifty_df):
     if not (CFG["min_pole_pct"] <= pole_pct <= CFG["max_pole_pct"]):
         return None, "F2_POLE"
 
-    # ── BASE
+    # BASE
     base = close.loc[pole_idx:].tail(CFG["vcp_base_days"])
     if len(base) < CFG["min_base_bars"]:
         return None, "F3_BASE"
 
-    # ── SWING-BASED CONTRACTION (RELAXED)
-    highs, lows = find_swings(base.values)
-
-    if len(lows) < 2:
+    # TRUE VCP CONTRACTION
+    if not check_vcp_contraction(base):
         return None, "F4_SWING"
 
-    pullbacks = [l[1] for l in lows]
+    # RANGE COMPRESSION
+    segments = np.array_split(base, 3)
+    ranges = []
 
-    valid = 0
-    for i in range(len(pullbacks) - 1):
-        if pullbacks[i + 1] >= pullbacks[i] * 0.97:
-            valid += 1
+    for seg in segments:
+        if len(seg) < 5:
+            return None, "F4_SWING"
+        r = (seg.max() - seg.min()) / seg.max()
+        ranges.append(r)
 
-    if valid < len(pullbacks) - 2:
+    if not (ranges[0] > ranges[1] > ranges[2]):
         return None, "F4_SWING"
 
-    # ── DEPTH
+    # DEPTH
     base_low = base.min()
     depth = ((pole_high - base_low) / pole_high) * 100
 
     if depth > 40:
         return None, "F5_DEPTH"
 
-    # ── VOLUME DRY-UP (INSIDE BASE)
+    # VOLUME DRY-UP
     vols = volume.loc[base.index]
 
     early = vols.iloc[:len(vols)//2].mean()
@@ -210,7 +236,7 @@ def detect_vcp(ticker, sector, nifty_df):
     if late > CFG["vol_contraction_ratio"] * early:
         return None, "F6_VOLUME"
 
-    # ── BREAKOUT PROXIMITY
+    # BREAKOUT PROXIMITY
     cmp = close.iloc[-1]
 
     if cmp < pole_high * CFG["near_high_threshold"]:
@@ -262,7 +288,6 @@ def run():
 
             time.sleep(CFG["sleep"])
 
-    # ── REPORT
     print("\n📊 FILTER REPORT")
     for k in FILTERS:
         print(f"{k}: {fails[k]}")
@@ -270,7 +295,6 @@ def run():
     if results:
         df = pd.DataFrame(results).sort_values(by="RS", ascending=False)
         df.to_csv("sniper_candidates.csv", index=False)
-
         print(f"\n✅ Found {len(results)} HIGH QUALITY setups")
     else:
         print("\n❌ No setups found")
