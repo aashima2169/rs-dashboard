@@ -30,8 +30,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          # Run Scout first
+      run: |
+          # Step 1: Execute Scout
           python agent.py
-          # Run Sniper second
+          
+          # Step 2: Execute Sniper
           python sniper_agent.py
