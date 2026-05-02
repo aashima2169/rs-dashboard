@@ -3,7 +3,6 @@ import json
 import time
 import warnings
 import logging
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -11,9 +10,7 @@ import requests
 import yfinance as yf
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
-
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-logger = logging.getLogger()
 
 CFG = {
     "top_n": 30,
@@ -28,10 +25,8 @@ def download(ticker):
         df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
         if df.empty:
             return None
-
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-
         return df.dropna()
     except:
         return None
@@ -76,19 +71,19 @@ def compute_rs(stock_df, nifty_df):
         return 1
 
 
-def find_swings(series, window=5):
-    highs, lows = [], []
+def compute_atr(df, period=14):
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
 
-    for i in range(window, len(series) - window):
-        chunk = series[i - window:i + window]
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
 
-        if series[i] == chunk.max():
-            highs.append(series[i])
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
 
-        if series[i] == chunk.min():
-            lows.append(series[i])
-
-    return highs, lows
+    return atr
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,58 +99,78 @@ def score_stock(ticker, sector, nifty_df):
 
     score = 0
 
-    # ── RS SCORE (0–20)
+    # ── RS (0–15)
     rs = compute_rs(df, nifty_df)
-    score += min(20, max(0, (rs - 0.9) * 50))
+    score += min(15, max(0, (rs - 0.95) * 40))
 
-    # ── TREND SCORE (0–20)
+    # ── TREND (0–15)
     ema50 = close.ewm(span=50).mean().iloc[-1]
     ema200 = close.ewm(span=200).mean().iloc[-1]
 
     if ema50 > ema200:
-        score += 10
+        score += 8
     if close.iloc[-1] > ema50:
-        score += 10
+        score += 7
 
-    # ── POLE SCORE (0–15)
-    recent = close.iloc[-200:]
-    pole_pct = (recent.max() - recent.min()) / recent.min() * 100
-    score += min(15, pole_pct / 5)
+    # ── STRONG MOVE (0–10)
+    move = (close.iloc[-150:].max() - close.iloc[-150:].min()) / close.iloc[-150:].min()
+    score += min(10, move * 10)
 
-    # ── BASE TIGHTNESS (0–20)
+    # ── BASE
     base = close.iloc[-60:]
     base_range = (base.max() - base.min()) / base.max()
 
-    if base_range < 0.1:
+    if base_range > 0.22:
+        return None
+
+    # ── TIGHTNESS (0–25)
+    if base_range < 0.08:
+        score += 25
+    elif base_range < 0.12:
         score += 20
-    elif base_range < 0.15:
+    elif base_range < 0.16:
+        score += 12
+
+    # ── RECENT TIGHTNESS (CRITICAL)
+    recent = base.iloc[-15:]
+    recent_range = (recent.max() - recent.min()) / recent.max()
+
+    if recent_range > base_range * 0.7:
+        return None
+
+    if recent_range < 0.05:
+        score += 20
+    elif recent_range < 0.08:
         score += 15
-    elif base_range < 0.2:
+    elif recent_range < 0.12:
+        score += 8
+
+    # ── ATR CONTRACTION (NEW CORE FILTER)
+    atr = compute_atr(df)
+
+    atr_base = atr.iloc[-60:]
+    atr_recent = atr.iloc[-15:]
+
+    if atr_recent.mean() > atr_base.mean() * 0.8:
+        return None  # no volatility contraction
+
+    # bonus for strong contraction
+    contraction_ratio = atr_recent.mean() / atr_base.mean()
+    if contraction_ratio < 0.6:
+        score += 15
+    elif contraction_ratio < 0.75:
         score += 10
+    else:
+        score += 5
 
-    # ── VCP STRUCTURE (0–15)
-    highs, lows = find_swings(base.values)
+    # ── EXPANSION FILTER
+    last_move = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
+    if last_move > 0.15:
+        score -= 15
 
-    if len(highs) >= 2 and len(lows) >= 2:
-        contractions = []
-
-        for i in range(min(len(highs), len(lows)) - 1):
-            drop = (highs[i] - lows[i]) / highs[i]
-            contractions.append(drop)
-
-        if len(contractions) >= 2:
-            improving = sum(
-                1 for i in range(len(contractions)-1)
-                if contractions[i+1] < contractions[i]
-            )
-            score += min(15, improving * 5)
-
-    # ── VOLUME DRY-UP (0–10)
+    # ── VOLUME DRY-UP
     vols = volume.iloc[-60:]
-    early = vols.iloc[:30].mean()
-    late = vols.iloc[30:].mean()
-
-    if late < early:
+    if vols.iloc[30:].mean() < vols.iloc[:30].mean():
         score += 10
 
     return {
@@ -171,7 +186,7 @@ def score_stock(ticker, sector, nifty_df):
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (SCORING MODE)\n")
+    print("\n🎯 VCP SNIPER (ATR + STRUCTURE MODE)\n")
 
     if not os.path.exists("active_sectors.json"):
         print("❌ active_sectors.json missing")
@@ -199,7 +214,7 @@ def run():
             time.sleep(CFG["sleep"])
 
     if not results:
-        print("\n❌ No data")
+        print("\n❌ No candidates")
         return
 
     df = pd.DataFrame(results)
@@ -207,7 +222,7 @@ def run():
 
     df.to_csv("sniper_candidates.csv", index=False)
 
-    print("\n🏆 TOP CANDIDATES")
+    print("\n🏆 TOP VCP-LIKE CANDIDATES\n")
     print(df.to_string(index=False))
 
 
