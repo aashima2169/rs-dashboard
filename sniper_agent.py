@@ -152,7 +152,7 @@ def detect_vcp(ticker, sector, cfg, fails):
 
         contraction_ratio = base_range / pole_range
 
-        if contraction_ratio > 0.6:
+        if contraction_ratio > 0.35:
             fails["Contraction"] += 1
             return None
 
@@ -184,7 +184,7 @@ def detect_vcp(ticker, sector, cfg, fails):
         # volatility compression
         range_pct = (recent.max() - recent.min()) / recent.mean()
 
-        if range_pct > 0.06:
+        if range_pct > 0.05:
             fails["Tightening"] += 1
             return None
 
