@@ -1,84 +1,75 @@
-import os, requests, json, time
+import os, requests, json
 import pandas as pd
 import yfinance as yf
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-def get_stocks(sector_key):
+def get_safe_close(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df['Close'].dropna()
+
+def calc_percentile(series):
+    if series.empty: return 0
+    current = series.iloc[-1]
+    return (series < current).mean() * 100
+
+def run_agent():
+    print("📊 --- SCOUT AGENT SESSION START ---")
     try:
         with open('config.json', 'r') as f:
             config = json.load(f)
-        official_name = config.get("nse_index_mapping", {}).get(sector_key)
         
-        print(f"   📡 NSE FETCH: Fetching symbols for {official_name}...")
-        headers = {"User-Agent": "Mozilla/5.0"}
-        session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers, timeout=10)
+        sector_tickers = config.get("sectors", {})
+        print(f"📂 Config loaded. Scanning {len(sector_tickers)} sectors...")
         
-        url = f"https://www.nseindia.com/api/equity-stockIndices?index={official_name.replace(' ', '%20')}"
-        response = session.get(url, headers=headers, timeout=10)
+        # Download Benchmark (Nifty 50)
+        bm_data = get_safe_close(yf.download("^NSEI", period="1y", progress=False))
         
-        if response.status_code == 200:
-            stocks = [f"{s['symbol']}.NS" for s in response.json()['data'] if s['symbol'] != official_name]
-            print(f"   ✅ SUCCESS: Found {len(stocks)} stocks.")
-            return stocks
-        return []
-    except Exception as e:
-        print(f"   ❌ FETCH ERROR: {e}")
-        return []
-
-def run_sniper():
-    print("\n🔫 --- SNIPER AGENT START ---")
-    
-    # LOG THE HANDOFF
-    if not os.path.exists('active_sectors.json'):
-        print("❌ ERROR: active_sectors.json is missing! Scout Agent did not run.")
-        return
-        
-    with open('active_sectors.json', 'r') as f:
-        active_sectors = json.load(f)
-    
-    print(f"📦 HANDOFF DATA RECEIVED: {active_sectors}")
-    
-    if not active_sectors:
-        print("ℹ️ LOG: Active sectors list is empty. Ending session.")
-        return
-
-    all_candidates = []
-    for sector in active_sectors:
-        print(f"\n📂 PROCESSING SECTOR: {sector}")
-        tickers = get_stocks(sector)
-        
-        for t in tickers:
+        results = []
+        for name, ticker in sector_tickers.items():
+            print(f"🔍 [SCANNING] {name} ({ticker})")
             try:
-                df = yf.download(t, period="1y", progress=False, auto_adjust=True)
-                if df.empty or len(df) < 50: continue
-                
-                close = df['Close'].dropna()
-                curr_price = float(close.iloc[-1])
-                ema20 = close.ewm(span=20).mean().iloc[-1]
-                ema50 = close.ewm(span=50).mean().iloc[-1]
-                
-                if curr_price > ema20 > ema50:
-                    h10, l10 = df['High'].tail(10).max(), df['Low'].tail(10).min()
-                    h30, l30 = df['High'].iloc[-40:-10].max(), df['Low'].iloc[-40:-10].min()
-                    tightness = (h10 - l10) / (h30 - l30) if (h30-l30) != 0 else 2.0
-                    
-                    if tightness < 1.15:
-                        print(f"      🔥 SETUP FOUND: {t} (Tightness: {round(tightness, 2)})")
-                        all_candidates.append({"ticker": t, "sector": sector, "price": round(curr_price, 2), "tight": round(float(tightness), 2)})
-            except:
-                continue
-            time.sleep(0.2)
+                s_data = get_safe_close(yf.download(ticker, period="1y", progress=False))
+                if s_data.empty:
+                    print(f"   ⚠️ LOG: No data found for {ticker}")
+                    continue
 
-    if all_candidates:
-        msg = "🎯 **SNIPER REPORT**\n\n`TICKER   SECTOR   PRICE    TIGHT`\n"
-        for c in sorted(all_candidates, key=lambda x: x['tight'])[:15]:
-            msg += f"`{c['ticker'].ljust(8)} {c['sector'].ljust(8)} {str(c['price']).ljust(8)} {str(c['tight']).ljust(5)}` \n"
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-    
-    print("✅ SNIPER TASK COMPLETED.")
+                combined = pd.concat([s_data, bm_data], axis=1).dropna()
+                combined.columns = ['s', 'b']
+                rs = combined['s'] / combined['b']
+                
+                # Performance Metrics
+                p3 = round(((rs.iloc[-1] / rs.iloc[-63]) - 1) * 100, 1)
+                p6 = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1)
+                r3 = round(calc_percentile(rs.pct_change(63).tail(252)))
+                r6 = round(calc_percentile(rs.pct_change(126).tail(252)))
+                
+                results.append({"name": name, "p3": p3, "p6": p6, "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
+            except Exception as e:
+                print(f"   ⚠️ LOG: Error processing {name}: {e}")
+
+        # Filter for momentum sectors (Positive Velocity)
+        df = pd.DataFrame(results).sort_values("prc", ascending=False)
+        active_sectors = df[(df['p3'] > 0) & (df['p6'] > 0)]['name'].tolist()
+        
+        # --- CRITICAL HANDOFF ---
+        # This saves the file that your Sniper is looking for
+        with open('active_sectors.json', 'w') as f:
+            json.dump(active_sectors, f)
+        print(f"📦 [HANDOFF] Active Sectors saved: {active_sectors}")
+
+        # Send Scout Report to Telegram
+        msg = "📊 **SCOUT REPORT**\n\n`SECTOR         PRC   3M_%` \n"
+        for _, r in df.iterrows():
+            msg += f"`{r['name'].ljust(14)} {str(r['prc']).ljust(5)} {str(r['p3']).ljust(5)}` \n"
+        
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                     json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+        
+    except Exception as e:
+        print(f"❌ CRITICAL SCOUT ERROR: {e}")
 
 if __name__ == "__main__":
-    run_sniper()
+    run_agent()
