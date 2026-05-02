@@ -1,7 +1,6 @@
 import os, requests, json, time
 import pandas as pd
 import yfinance as yf
-import numpy as np
 import warnings
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -24,88 +23,76 @@ def get_stocks(sector_key):
         return []
     except: return []
 
-def send_telegram_file(file_path):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-        with open(file_path, "rb") as file:
-            requests.post(url, data={"chat_id": CHAT_ID}, files={"document": file})
-    except: pass
-
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: MINERVINI VCP SCAN ---")
+    print("\n🎯 --- SNIPER MISSION: DEBUG MODE (EMA + VOLUME) ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
 
     all_data = [] 
+    filename = "sniper_candidates.csv"
     
     for sector in active_sectors:
         tickers = get_stocks(sector)
-        print(f"📂 Sector [{sector}]: Screening...")
+        print(f"📂 Sector [{sector}]: Screening {len(tickers)} tickers...")
         
         for t in tickers:
             try:
-                df = yf.download(t, period="2y", progress=False, auto_adjust=True)
-                if df.empty or len(df) < 250: continue
+                df = yf.download(t, period="1y", progress=False, auto_adjust=True)
+                if df.empty or len(df) < 50: continue
                 
                 close = df['Close']
                 volume = df['Volume']
                 cmp = float(close.iloc[-1])
                 
-                # --- 1. MINERVINI TREND TEMPLATE (STAGE 2) ---
-                sma50 = close.rolling(50).mean().iloc[-1]
-                sma150 = close.rolling(150).mean().iloc[-1]
-                sma200 = close.rolling(200).mean().iloc[-1]
-                low_52 = close.tail(252).min()
-                high_52 = close.tail(252).max()
+                # --- RULE 1: EMA STACK (10 > 21 > 50) ---
+                ema10 = close.ewm(span=10).mean().iloc[-1]
+                ema21 = close.ewm(span=21).mean().iloc[-1]
+                ema50 = close.ewm(span=50).mean().iloc[-1]
                 
-                # Structural Rules
-                r1 = cmp > sma150 and cmp > sma200
-                r2 = sma150 > sma200
-                r3 = sma200 > close.rolling(200).mean().iloc[-22]
-                r4 = sma50 > sma150 and sma50 > sma200
-                r5 = cmp > sma50
-                r6 = cmp >= (high_52 * 0.75) # Within 25% of 52-week high
-                r7 = cmp >= (low_52 * 1.30)  # At least 30% above 52-week low
+                is_ema_stacked = ema10 > ema21 > ema50
                 
-                if not (r1 and r2 and r3 and r4 and r5 and r6 and r7):
-                    continue
+                # --- RULE 2: PRICE > EMA 50 ---
+                is_above_ema50 = cmp > ema50
+                
+                # --- RULE 3: VOLUME DRY-UP (VDU) ---
+                # Average volume of last 20 days vs average of last 3 days
+                avg_vol_20 = volume.rolling(20).mean().iloc[-1]
+                curr_vol_3 = volume.tail(3).mean()
+                vdu_ratio = curr_vol_3 / avg_vol_20
+                
+                # We use a very loose volume check (0.95) to see what passes
+                is_vdu = vdu_ratio < 0.95 
 
-                # --- 2. VCP & VDU (THE 'CHEAT' AREA) ---
-                vcp_ratio = close.tail(10).std() / close.tail(40).std()
-                vdu_ratio = volume.tail(3).mean() / volume.rolling(20).mean().iloc[-1]
-                
-                if vcp_ratio < 0.6 and vdu_ratio < 0.8:
+                # --- APPLYING RULES 1 BY 1 ---
+                if is_ema_stacked and is_above_ema50 and is_vdu:
                     all_data.append({
-                        "Ticker": t, "Sector": sector, "CMP": round(cmp, 2),
-                        "EMA10": round(close.ewm(span=10).mean().iloc[-1], 2),
-                        "EMA20": round(close.ewm(span=20).mean().iloc[-1], 2),
-                        "EMA50": round(close.ewm(span=50).mean().iloc[-1], 2),
-                        "VCP_Ratio": round(vcp_ratio, 2), 
+                        "Ticker": t,
+                        "Sector": sector,
+                        "CMP": round(cmp, 2),
+                        "EMA10": round(ema10, 2),
+                        "EMA21": round(ema21, 2),
+                        "EMA50": round(ema50, 2),
                         "VDU_Ratio": round(vdu_ratio, 2)
                     })
             except: continue
             time.sleep(0.05)
 
-    # --- SAVE FILE (Matches YAML Path) ---
-    filename = "sniper_candidates.csv"
     if all_data:
         pd.DataFrame(all_data).to_csv(filename, index=False)
-        print(f"✅ Created {filename} with {len(all_data)} stocks.")
+        print(f"✅ Found {len(all_data)} stocks matching current criteria.")
         
-        # Send to Telegram
-        send_telegram_file(filename)
-        
-        # Summary Message
-        msg = "🎯 **MINERVINI VCP SHORTLIST**\n`TICKER   CMP      VCP    VDU` \n"
-        for c in all_data[:10]:
-            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['VCP_Ratio']).ljust(6)} {str(c['VDU_Ratio']).ljust(6)}` \n"
+        # Send File and Summary to Telegram
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+        with open(filename, "rb") as file:
+            requests.post(url, data={"chat_id": CHAT_ID}, files={"document": file})
+            
+        msg = f"🎯 **DEBUG REPORT: EMA + VOL**\nFound {len(all_data)} matches.\n"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                     json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+                     json={"chat_id": CHAT_ID, "text": msg})
     else:
-        # Create an empty file so the YAML upload doesn't error out
         pd.DataFrame(columns=["Ticker"]).to_csv(filename, index=False)
-        print("ℹ️ No VCP setups found. Created empty CSV.")
+        print("ℹ️ Zero matches with EMA + Volume rules.")
 
 if __name__ == "__main__":
     run_sniper()
