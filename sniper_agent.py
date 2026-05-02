@@ -12,29 +12,23 @@ import yfinance as yf
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LOGGING
-# ─────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────────────────────────────────────
 CFG = {
     "rs_threshold": 0.98,
 
-    "min_pole_pct": 10,
+    "min_pole_pct": 12,
     "max_pole_pct": 70,
     "pole_lookback_days": 200,
     "pole_exclude_recent": 5,
     "pole_trough_window": 50,
 
-    "vcp_base_days": 80,
-    "min_base_bars": 18,
+    "vcp_base_days": 70,
+    "min_base_bars": 20,
 
     "vol_contraction_ratio": 0.9,
-    "near_high_threshold": 0.85,
+    "near_high_threshold": 0.9,
 
     "sleep": 0.03,
 }
@@ -51,22 +45,16 @@ FILTERS = [
     "F7_BREAKOUT",
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DATA
-# ─────────────────────────────────────────────────────────────────────────────
 def download(ticker):
     try:
         df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
         if df.empty:
             return None
-
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-
         return df.dropna()
     except:
         return None
-
 
 def get_stocks(sector):
     try:
@@ -85,19 +73,11 @@ def get_stocks(sector):
         url = f"https://www.nseindia.com/api/equity-stockIndices?index={name.replace(' ', '%20')}"
         res = session.get(url, headers=headers)
 
-        return [
-            f"{x['symbol']}.NS"
-            for x in res.json()["data"]
-            if x["symbol"] != name
-        ]
+        return [f"{x['symbol']}.NS" for x in res.json()["data"] if x["symbol"] != name]
 
     except:
         return []
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# RS FILTER
-# ─────────────────────────────────────────────────────────────────────────────
 def compute_rs(stock_df, nifty_df):
     try:
         s_ret = stock_df["Close"].pct_change(100).iloc[-1]
@@ -106,29 +86,20 @@ def compute_rs(stock_df, nifty_df):
     except:
         return 0
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SWING DETECTION
-# ─────────────────────────────────────────────────────────────────────────────
 def find_swings(series, window=5):
     highs, lows = [], []
-
     for i in range(window, len(series) - window):
         chunk = series[i - window:i + window]
-
         if series[i] == chunk.max():
             highs.append((i, series[i]))
-
         if series[i] == chunk.min():
             lows.append((i, series[i]))
-
     return highs, lows
-
 
 def check_vcp_contraction(base):
     highs, lows = find_swings(base.values)
 
-    if len(highs) < 2 or len(lows) < 2:
+    if len(highs) < 3 or len(lows) < 3:
         return False
 
     highs = sorted(highs, key=lambda x: x[0])
@@ -149,17 +120,14 @@ def check_vcp_contraction(base):
     if len(contractions) < 2:
         return False
 
-    improving = 0
+    # require visible contraction trend
+    score = 0
     for i in range(len(contractions) - 1):
-        if contractions[i + 1] <= contractions[i] * 1.2:
-            improving += 1
+        if contractions[i+1] < contractions[i]:
+            score += 1
 
-    return improving >= len(contractions) // 2
+    return score >= 1
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# VCP DETECTION
-# ─────────────────────────────────────────────────────────────────────────────
 def detect_vcp(ticker, sector, nifty_df):
     df = download(ticker)
     if df is None or len(df) < 200:
@@ -168,19 +136,16 @@ def detect_vcp(ticker, sector, nifty_df):
     close = df["Close"]
     volume = df["Volume"]
 
-    # RS
     rs = compute_rs(df, nifty_df)
     if rs < CFG["rs_threshold"]:
         return None, "RS_FAIL"
 
-    # TREND
     ema50 = close.ewm(span=50).mean().iloc[-1]
     ema200 = close.ewm(span=200).mean().iloc[-1]
 
     if not (ema50 > ema200 or close.iloc[-1] > ema50):
         return None, "F1_TREND"
 
-    # POLE
     search = close.iloc[-(CFG["pole_lookback_days"] + 5):-5]
     if len(search) < 30:
         return None, "F2_POLE"
@@ -198,45 +163,31 @@ def detect_vcp(ticker, sector, nifty_df):
     if not (CFG["min_pole_pct"] <= pole_pct <= CFG["max_pole_pct"]):
         return None, "F2_POLE"
 
-    # BASE
     base = close.loc[pole_idx:].tail(CFG["vcp_base_days"])
     if len(base) < CFG["min_base_bars"]:
         return None, "F3_BASE"
 
-    # VCP contraction
     if not check_vcp_contraction(base):
         return None, "F4_SWING"
 
-    # RANGE COMPRESSION (VERY RELAXED)
-    segments = np.array_split(base, 3)
-    ranges = []
-
-    for seg in segments:
-        if len(seg) < 5:
-            return None, "F4_SWING"
-        r = (seg.max() - seg.min()) / seg.max()
-        ranges.append(r)
-
-    if not (ranges[2] < ranges[0] * 0.9):
+    # strict volatility cap (kills Oil-type charts)
+    base_range = (base.max() - base.min()) / base.max()
+    if base_range > 0.18:
         return None, "F4_SWING"
 
-    # DEPTH
     base_low = base.min()
     depth = ((pole_high - base_low) / pole_high) * 100
 
-    if depth > 45:
+    if depth > 35:
         return None, "F5_DEPTH"
 
-    # VOLUME DRY-UP (RELAXED)
     vols = volume.loc[base.index]
-
     early = vols.iloc[:len(vols)//2].mean()
     late = vols.iloc[len(vols)//2:].mean()
 
     if late > CFG["vol_contraction_ratio"] * early:
         return None, "F6_VOLUME"
 
-    # BREAKOUT PROXIMITY
     cmp = close.iloc[-1]
 
     if cmp < pole_high * CFG["near_high_threshold"]:
@@ -251,15 +202,10 @@ def detect_vcp(ticker, sector, nifty_df):
         "Pivot": round(pole_high * 1.01, 2),
     }, "PASS"
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────────────────────────────────────
 def run():
-    print("\n🎯 VCP SNIPER (BALANCED PRO MODE)\n")
+    print("\n🎯 VCP SNIPER (STRICT VISUAL MODE)\n")
 
     if not os.path.exists("active_sectors.json"):
-        print("❌ active_sectors.json missing")
         return
 
     with open("active_sectors.json") as f:
@@ -267,7 +213,6 @@ def run():
 
     nifty = download("^NSEI")
     if nifty is None:
-        print("❌ Failed to load NIFTY data")
         return
 
     results = []
@@ -293,12 +238,10 @@ def run():
         print(f"{k}: {fails[k]}")
 
     if results:
-        df = pd.DataFrame(results).sort_values(by="RS", ascending=False)
-        df.to_csv("sniper_candidates.csv", index=False)
-        print(f"\n✅ Found {len(results)} HIGH QUALITY setups")
+        pd.DataFrame(results).to_csv("sniper_candidates.csv", index=False)
+        print(f"\n✅ Found {len(results)} CLEAN VCP setups")
     else:
-        print("\n❌ No setups found")
-
+        print("\n❌ No clean setups found")
 
 if __name__ == "__main__":
     run()
