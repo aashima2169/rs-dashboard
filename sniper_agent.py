@@ -24,60 +24,81 @@ def get_stocks(sector_key):
     except: return []
 
 def run_sniper():
-    print("\n🎯 --- SNIPER MISSION: DEEP DEBUG ---")
+    print("\n🎯 --- SNIPER MISSION: EMA 10/20/50 POSITION SCAN ---")
     if not os.path.exists('active_sectors.json'): return
     with open('active_sectors.json', 'r') as f:
         active_sectors = json.load(f)
 
-    all_candidates = []
+    all_data = [] 
+    
     for sector in active_sectors:
         tickers = get_stocks(sector)
-        print(f"\n📂 Sector [{sector}]: Found {len(tickers)} stocks.")
+        print(f"📂 Sector [{sector}]: Processing {len(tickers)} tickers...")
         
         for t in tickers:
             try:
-                # 1. Download Data
                 df = yf.download(t, period="1y", progress=False, auto_adjust=True)
-                
-                # Fix for MultiIndex columns in new yfinance versions
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 
-                if df.empty or len(df) < 50:
-                    print(f"   ❌ {t.ljust(12)}: No data found")
-                    continue
+                if df.empty or len(df) < 60: continue
                 
-                # 2. Extract Values
+                # --- CALCULATE ALL EMAs ---
                 close = df['Close'].dropna()
-                curr_price = float(close.iloc[-1])
-                ema20 = close.ewm(span=20).mean().iloc[-1]
-                ema50 = close.ewm(span=50).mean().iloc[-1]
+                cmp = round(float(close.iloc[-1]), 2)
+                ema10 = round(close.ewm(span=10).mean().iloc[-1], 2)
+                ema20 = round(close.ewm(span=20).mean().iloc[-1], 2)
+                ema50 = round(close.ewm(span=50).mean().iloc[-1], 2)
                 
-                # 3. DEBUG LOGGING: Show us the values
-                # print(f"DEBUG {t}: Price {round(curr_price,1)} | EMA20 {round(ema20,1)} | EMA50 {round(ema50,1)}")
+                # Proximity to EMA 20 (Mean Reversion Check)
+                dist_ema20_pct = round(((cmp - ema20) / ema20) * 100, 2)
+                
+                # Tightness (VCP Check)
+                h10, l10 = df['High'].tail(10).max(), df['Low'].tail(10).min()
+                h30, l30 = df['High'].iloc[-40:-10].max(), df['Low'].iloc[-40:-10].min()
+                denom = (h30 - l30) if (h30 - l30) != 0 else 1.0
+                tightness = round(float((h10 - l10) / denom), 2)
 
-                # 4. TREND CHECK
-                if curr_price > ema20 and ema20 > ema50:
-                    print(f"   ✅ TREND MATCH: {t.ljust(12)}")
-                    all_candidates.append({
-                        "ticker": t, "sector": sector, "price": round(curr_price, 2)
+                # --- ELITE CRITERIA ---
+                # 1. Stacked Trend: Price > EMA 10 > EMA 20 > EMA 50
+                # 2. Not Overextended: CMP is within 5% of EMA 20
+                # 3. VCP Pattern: Tightness < 1.25
+                if cmp > ema10 > ema20 > ema50 and dist_ema20_pct < 5.0 and tightness < 1.30:
+                    
+                    status = "🔥 BUY ZONE" if dist_ema20_pct < 2.5 else "👀 WATCH"
+                    
+                    all_data.append({
+                        "Ticker": t,
+                        "Sector": sector,
+                        "CMP": cmp,
+                        "EMA10": ema10,
+                        "EMA20": ema20,
+                        "EMA50": ema50,
+                        "Dist_EMA20_%": dist_ema20_pct,
+                        "Tightness": tightness,
+                        "Signal": status
                     })
-                else:
-                    # Optional: uncomment to see rejections in GitHub logs
-                    # print(f"   ❌ {t.ljust(12)}: Failed Trend (P:{round(curr_price,1)} E20:{round(ema20,1)})")
-                    pass
-            except Exception as e:
-                print(f"   ⚠️ Error scanning {t}: {e}")
-                continue
+            except: continue
             time.sleep(0.1)
 
-    print(f"\n✅ TOTAL TREND MATCHES: {len(all_candidates)}")
-    if all_candidates:
-        msg = f"🎯 **SNIPER TREND REPORT**\nFound {len(all_candidates)} uptrending stocks."
+    if all_data:
+        # Save detailed CSV for analysis
+        df_results = pd.DataFrame(all_data)
+        df_results.to_csv("sniper_candidates.csv", index=False)
+        
+        # Sort for Telegram (tightest first)
+        all_data = sorted(all_data, key=lambda x: x['Tightness'])
+        
+        msg = "🎯 **SNIPER ELITE: STACKED EMAs**\n"
+        msg += "`TICKER   CMP      TIGHT  DIST%`\n"
+        for c in all_data[:15]:
+            msg += f"`{c['Ticker'].ljust(8)} {str(c['CMP']).ljust(8)} {str(c['Tightness']).ljust(5)}  {str(c['Dist_EMA20_%']).ljust(5)}%` \n"
+        
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                     json={"chat_id": CHAT_ID, "text": msg})
+                     json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+        print(f"✅ Mission Complete: Found {len(all_data)} Elite stocks.")
     else:
-        print("ℹ️ No matches found in current scan.")
+        print("ℹ️ No stocks met the Stacked EMA + VCP criteria today.")
 
 if __name__ == "__main__":
     run_sniper()
