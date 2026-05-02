@@ -136,25 +136,40 @@ def detect_vcp(ticker, sector, cfg, fails):
         contraction_ratio = base_range / pole_range
 
         # tighter now
-        if contraction_ratio > 0.6:
+        if contraction_ratio > 0.5:
             fails["Contraction"] += 1
             return None
 
         # ========================
         # RIGHT SIDE TIGHTENING
         # ========================
-        recent = base.tail(10)
+       recent = base.tail(10)
 
-        if len(recent) < 5:
-            fails["Tightening"] += 1
-            return None
+if len(recent) < 6:
+    fails["Tightening"] += 1
+    return None
 
-        range_pct = (recent.max() - recent.min()) / recent.mean()
+highs = recent.rolling(3).max()
+lows = recent.rolling(3).min()
 
-        if range_pct > 0.08:
-            fails["Tightening"] += 1
-            return None
+# 1. Range contraction check
+range_now = highs.iloc[-1] - lows.iloc[-1]
+range_prev = highs.iloc[-4] - lows.iloc[-4]
 
+if range_now > range_prev:
+    fails["Tightening"] += 1
+    return None
+
+# 2. Higher lows check
+if recent.iloc[-1] < recent.iloc[-3]:
+    fails["Tightening"] += 1
+    return None
+
+# 3. No wide candles
+range_pct = (recent.max() - recent.min()) / recent.mean()
+if range_pct > 0.06:
+    fails["Tightening"] += 1
+    return None
         # ========================
         # FINAL OUTPUT
         # ========================
