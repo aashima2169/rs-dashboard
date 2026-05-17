@@ -99,8 +99,13 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT fabricate or assume news.
 
 Score 0-100: 0=very bearish, 50=neutral, 100=very bullish for Indian equities.
-For topics with recent news: return score + finding.
-For topics with no recent news: return null.
+For topics with recent news: return score + finding (max 12 words, one crisp fact).
+For topics with no recent news in last 14 days: return null.
+
+For "summary": write exactly ONE sentence (max 20 words) that tells a trader what 
+the macro environment means for Indian equities THIS week. Be specific — mention 
+actual data points found. Name sectors if relevant. No generic statements.
+Example: "Crude at $106 and rupee at ₹96 favour Pharma exporters; avoid Metal and Energy this week."
 
 Example of null topic:
   "rbi_policy": null
