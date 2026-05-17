@@ -229,7 +229,10 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
     print(f"\n  📊 Quant:{quant_score} | Qual:{qual_score} | Final:{final_score}")
     print(f"  🎯 Regime: {regime} (PRC adj: {prc_adjustment:+d})")
     for key, val in macro_scores.items():
-        print(f"     {key:<22} score:{val.get('score','?'):>3}  {val.get('finding','')}")
+        if val is None:
+            print(f"     {key:<22} No recent news")
+        else:
+            print(f"     {key:<22} score:{val.get('score','?'):>3}  {val.get('finding','')}")
 
     return decision
 
