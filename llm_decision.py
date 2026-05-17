@@ -20,10 +20,11 @@ def get_gemini():
         print("⚠️  GEMINI_API_KEY not set — LLM decision skipped")
         return None
     try:
-        from google import genai
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.5-flash")
         print("✅ Gemini client ready")
-        return client
+        return model
     except Exception as e:
         print(f"❌ Gemini setup failed: {e}")
         return None
@@ -146,18 +147,19 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
     prompt = build_prompt(quant_score, signal_summary, sector_scores, config)
 
     try:
-        from google import genai
-        from google.genai import types
+        import google.generativeai as genai
 
         print("  📡 Calling Gemini with Google Search grounding...")
 
-        response = client.models.generate_content(
-            model="models/gemini-1.5-flash",
+        # Google Search grounding tool
+        google_search_tool = genai.protos.Tool(
+            google_search_retrieval=genai.protos.GoogleSearchRetrieval()
+        )
+
+        response = client.generate_content(
             contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-            ),
+            tools=[google_search_tool],
+            generation_config=genai.GenerationConfig(temperature=0.2),
         )
 
         raw = response.text.strip()
