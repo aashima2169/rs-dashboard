@@ -1,17 +1,101 @@
 {
   "sectors": {
-    "Power": "^CNXENERGY",
-    "PSE": "^CNXPSE",
-    "Pharma": "^CNXPHARMA",
-    "CPSE": "CPSEETF.NS",
-    "Metal": "^CNXMETAL"
+    "Auto"            : "^CNXAUTO",
+    "Bank"            : "^NSEBANK",
+    "Cement"          : "^CNXCONSUM",
+    "Chemicals"       : "^CNXCHEMICALS",
+    "FinServices"     : "^CNXFINANCE",
+    "FMCG"            : "^CNXFMCG",
+    "Healthcare"      : "^CNXPHARMA",
+    "IT"              : "^CNXIT",
+    "Media"           : "^CNXMEDIA",
+    "Metal"           : "^CNXMETAL",
+    "Pharma"          : "^CNXPHARMA",
+    "Realty"          : "^CNXREALTY",
+    "ConsumerDurables": "^CNXCONSUMERDURAB",
+    "OilGas"          : "^CNXENERGY",
+    "Energy"          : "^CNXENERGY",
+    "CPSE"            : "CPSEETF.NS",
+    "PSE"             : "^CNXPSE",
+    "Commodities"     : "^CNXCOMMODITIES",
+    "Services"        : "^CNXSERVICE",
+    "MNC"             : "^CNXMNC",
+    "Defence"         : "^CNXDEFENCE",
+    "Mobility"        : "^CNXMOBILITY",
+    "Housing"         : "^CNXHOUSING",
+    "Transportation"  : "^CNXTRANSPORT"
   },
 
-  "nse_index_mapping": {
-    "Power": "NIFTY ENERGY",
-    "PSE": "NIFTY PSE",
-    "Pharma": "NIFTY PHARMA",
-    "CPSE": "NIFTY CPSE",
-    "Metal": "NIFTY METAL"
+  "nse_index_names": {
+    "Auto"            : "NIFTY AUTO",
+    "Bank"            : "NIFTY BANK",
+    "Cement"          : "NIFTY CEMENT",
+    "Chemicals"       : "NIFTY CHEMICALS",
+    "FinServices"     : "NIFTY FINANCIAL SERVICES",
+    "FMCG"            : "NIFTY FMCG",
+    "Healthcare"      : "NIFTY HEALTHCARE INDEX",
+    "IT"              : "NIFTY IT",
+    "Media"           : "NIFTY MEDIA",
+    "Metal"           : "NIFTY METAL",
+    "Pharma"          : "NIFTY PHARMA",
+    "Realty"          : "NIFTY REALTY",
+    "ConsumerDurables": "NIFTY CONSUMER DURABLES",
+    "OilGas"          : "NIFTY OIL AND GAS",
+    "Energy"          : "NIFTY ENERGY",
+    "CPSE"            : "NIFTY CPSE",
+    "PSE"             : "NIFTY PSE",
+    "Commodities"     : "NIFTY COMMODITIES",
+    "Services"        : "NIFTY SERVICES SECTOR",
+    "MNC"             : "NIFTY MNC",
+    "Defence"         : "NIFTY INDIA DEFENCE",
+    "Mobility"        : "NIFTY MOBILITY",
+    "Housing"         : "NIFTY HOUSING",
+    "Transportation"  : "NIFTY TRANSPORTATION & LOGISTICS"
+  },
+
+  "filters": {
+    "global": {
+      "min_price_inr"       : 20,
+      "min_avg_turnover_cr" : 5,
+      "min_avg_volume_20d"  : 100000,
+      "ema_periods"         : [11, 20, 50],
+      "min_data_days"       : 200
+    },
+
+    "vcp": {
+      "max_from_52wk_high_pct" : 20,
+      "min_pole_pct"           : 25,
+      "pole_lookback_days"     : 126,
+      "min_base_days"          : 15,
+      "max_base_days"          : 60,
+      "max_contraction_ratio"  : 0.20,
+      "max_tight_range_pct"    : 0.08,
+      "tight_window_days"      : 10,
+      "require_volume_dry_up"  : true
+    },
+
+    "flag_pole": {
+      "min_pole_pct"          : 20,
+      "max_pole_days"         : 25,
+      "min_retracement_pct"   : 15,
+      "max_retracement_pct"   : 50,
+      "min_flag_days"         : 5,
+      "max_flag_days"         : 20,
+      "max_flag_range_pct"    : 0.15,
+      "min_price_in_flag_pct" : 0.60,
+      "volume_ratio_max"      : 0.80
+    },
+
+    "big_base": {
+      "min_base_days"          : 30,
+      "max_base_days"          : 120,
+      "max_from_base_high_pct" : 5,
+      "min_prior_move_pct"     : 30,
+      "prior_move_lookback"    : 126,
+      "max_base_range_pct"     : 40,
+      "min_base_range_pct"     : 10,
+      "min_support_tests"      : 2,
+      "support_zone_pct"       : 3
+    }
   }
 }
