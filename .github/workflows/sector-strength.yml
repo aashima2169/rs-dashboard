@@ -19,8 +19,9 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests pandas yfinance numpy supabase
+          pip install requests pandas yfinance numpy supabase google-generativeai
 
+      # ── Step 1: Scout Agent (RS scoring + drift + Supabase) ───────────────
       - name: Run Scout Agent
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -29,9 +30,20 @@ jobs:
           SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
         run: python agent.py
 
-      - name: Upload Sector Scores
+      # ── Step 2: Macro Agent (market context + Gemini + enriched Telegram) ──
+      - name: Run Macro Agent
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
+        run: python macro_agent.py
+
+      # ── Artifacts ─────────────────────────────────────────────────────────
+      - name: Upload Outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sector-scores
-          path: sector_scores.json
+          name: scout-outputs
+          path: |
+            sector_scores.json
+            macro_output.json
