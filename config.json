@@ -128,7 +128,7 @@
           ]
         },
         "rbi_policy": {
-          "query": "RBI monetary policy interest rates India latest",
+          "query": "RBI monetary policy India latest news 2026",
           "weight": 15,
           "sectors": [
             "PSUBank",
@@ -138,7 +138,7 @@
           ]
         },
         "rupee_dollar": {
-          "query": "Indian rupee US dollar exchange rate trend",
+          "query": "Indian rupee US dollar exchange rate this week",
           "weight": 10,
           "sectors": [
             "IT",
@@ -147,7 +147,7 @@
           ]
         },
         "crude_oil": {
-          "query": "crude oil price trend impact India this week",
+          "query": "crude oil price impact India this week",
           "weight": 10,
           "sectors": [
             "Energy",
@@ -166,7 +166,7 @@
           ]
         },
         "tariffs_trade": {
-          "query": "US China tariffs trade war import export duties India impact",
+          "query": "US China tariffs trade war India impact latest 2026",
           "weight": 10,
           "sectors": [
             "Metal",
@@ -176,7 +176,7 @@
           ]
         },
         "geopolitical_war": {
-          "query": "geopolitical tensions war conflict impact emerging markets India",
+          "query": "geopolitical war conflict impact India latest 2026",
           "weight": 10,
           "sectors": [
             "Metal",
@@ -185,7 +185,7 @@
           ]
         },
         "customs_duty_bans": {
-          "query": "India custom duty changes import export ban policy announcement",
+          "query": "India import export ban custom duty latest 2026",
           "weight": 10,
           "sectors": [
             "Metal",
@@ -195,7 +195,7 @@
           ]
         },
         "healthcare_virus": {
-          "query": "new virus outbreak health scare pandemic risk global India",
+          "query": "virus outbreak pandemic health scare India 2026",
           "weight": 5,
           "sectors": [
             "Pharma",
@@ -204,7 +204,7 @@
           ]
         },
         "domestic_policy": {
-          "query": "India government budget policy reform announcement this week",
+          "query": "India government policy budget announcement latest 2026",
           "weight": 10,
           "sectors": [
             "PSE",
