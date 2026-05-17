@@ -3,7 +3,7 @@ name: Scout Agent — Sector RS Report
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 10 * * 0'   # Sunday 4:00 PM IST — weekly sector review
+    - cron: '30 10 * * 0'   # Sunday 4:00 PM IST
 
 jobs:
   scout:
@@ -19,12 +19,14 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests pandas yfinance numpy
+          pip install requests pandas yfinance numpy supabase
 
       - name: Run Scout Agent
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
         run: python agent.py
 
       - name: Upload Sector Scores
