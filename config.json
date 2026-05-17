@@ -1,87 +1,308 @@
 {
   "sectors": {
-    "Auto"        : "^CNXAUTO",
-    "Bank"        : "^NSEBANK",
-    "Commodities" : "^CNXCMDT",
-    "Consumption" : "^CNXCONSUM",
-    "Energy"      : "^CNXENERGY",
-    "FinServices" : "^CNXFINSERV",
-    "FMCG"        : "^CNXFMCG",
-    "Infra"       : "^CNXINFRA",
-    "IT"          : "^CNXIT",
-    "Media"       : "^CNXMEDIA",
-    "Metal"       : "^CNXMETAL",
-    "MNC"         : "^CNXMNC",
-    "Pharma"      : "^CNXPHARMA",
-    "PSE"         : "^CNXPSE",
-    "PSUBank"     : "^CNXPSUBANK",
-    "Realty"      : "^CNXREALTY",
-    "Services"    : "^CNXSERVICE"
+    "Auto": "^CNXAUTO",
+    "Bank": "^NSEBANK",
+    "Commodities": "^CNXCMDT",
+    "Consumption": "^CNXCONSUM",
+    "Energy": "^CNXENERGY",
+    "FinServices": "^CNXFINSERV",
+    "FMCG": "^CNXFMCG",
+    "Infra": "^CNXINFRA",
+    "IT": "^CNXIT",
+    "Media": "^CNXMEDIA",
+    "Metal": "^CNXMETAL",
+    "MNC": "^CNXMNC",
+    "Pharma": "^CNXPHARMA",
+    "PSE": "^CNXPSE",
+    "PSUBank": "^CNXPSUBANK",
+    "Realty": "^CNXREALTY",
+    "Services": "^CNXSERVICE"
   },
-
   "nse_index_names": {
-    "Auto"        : "NIFTY AUTO",
-    "Bank"        : "NIFTY BANK",
-    "Commodities" : "NIFTY COMMODITIES",
-    "Consumption" : "NIFTY INDIA CONSUMPTION",
-    "Energy"      : "NIFTY ENERGY",
-    "FinServices" : "NIFTY FINANCIAL SERVICES",
-    "FMCG"        : "NIFTY FMCG",
-    "Infra"       : "NIFTY INFRASTRUCTURE",
-    "IT"          : "NIFTY IT",
-    "Media"       : "NIFTY MEDIA",
-    "Metal"       : "NIFTY METAL",
-    "MNC"         : "NIFTY MNC",
-    "Pharma"      : "NIFTY PHARMA",
-    "PSE"         : "NIFTY PSE",
-    "PSUBank"     : "NIFTY PSU BANK",
-    "Realty"      : "NIFTY REALTY",
-    "Services"    : "NIFTY SERVICES SECTOR"
+    "Auto": "NIFTY AUTO",
+    "Bank": "NIFTY BANK",
+    "Commodities": "NIFTY COMMODITIES",
+    "Consumption": "NIFTY INDIA CONSUMPTION",
+    "Energy": "NIFTY ENERGY",
+    "FinServices": "NIFTY FINANCIAL SERVICES",
+    "FMCG": "NIFTY FMCG",
+    "Infra": "NIFTY INFRASTRUCTURE",
+    "IT": "NIFTY IT",
+    "Media": "NIFTY MEDIA",
+    "Metal": "NIFTY METAL",
+    "MNC": "NIFTY MNC",
+    "Pharma": "NIFTY PHARMA",
+    "PSE": "NIFTY PSE",
+    "PSUBank": "NIFTY PSU BANK",
+    "Realty": "NIFTY REALTY",
+    "Services": "NIFTY SERVICES SECTOR"
   },
-
   "filters": {
     "global": {
-      "min_price_inr"       : 20,
-      "min_avg_turnover_cr" : 5,
-      "min_avg_volume_20d"  : 100000,
-      "ema_periods"         : [11, 20, 50],
-      "min_data_days"       : 200
+      "min_price_inr": 20,
+      "min_avg_turnover_cr": 5,
+      "min_avg_volume_20d": 100000,
+      "ema_periods": [
+        11,
+        20,
+        50
+      ],
+      "min_data_days": 200
     },
-
     "vcp": {
-      "max_from_52wk_high_pct" : 20,
-      "min_pole_pct"           : 25,
-      "pole_lookback_days"     : 126,
-      "min_base_days"          : 15,
-      "max_base_days"          : 60,
-      "max_contraction_ratio"  : 0.20,
-      "max_tight_range_pct"    : 0.08,
-      "tight_window_days"      : 10,
-      "require_volume_dry_up"  : true
+      "max_from_52wk_high_pct": 20,
+      "min_pole_pct": 25,
+      "pole_lookback_days": 126,
+      "min_base_days": 15,
+      "max_base_days": 60,
+      "max_contraction_ratio": 0.2,
+      "max_tight_range_pct": 0.08,
+      "tight_window_days": 10,
+      "require_volume_dry_up": true
     },
-
     "flag_pole": {
-      "min_pole_pct"          : 20,
-      "max_pole_days"         : 25,
-      "min_retracement_pct"   : 15,
-      "max_retracement_pct"   : 50,
-      "min_flag_days"         : 5,
-      "max_flag_days"         : 20,
-      "max_flag_range_pct"    : 0.15,
-      "min_price_in_flag_pct" : 0.60,
-      "volume_ratio_max"      : 0.80
+      "min_pole_pct": 20,
+      "max_pole_days": 25,
+      "min_retracement_pct": 15,
+      "max_retracement_pct": 50,
+      "min_flag_days": 5,
+      "max_flag_days": 20,
+      "max_flag_range_pct": 0.15,
+      "min_price_in_flag_pct": 0.6,
+      "volume_ratio_max": 0.8
     },
-
     "big_base": {
-      "min_base_days"          : 30,
-      "max_base_days"          : 120,
-      "max_from_base_high_pct" : 5,
-      "min_prior_move_pct"     : 30,
-      "prior_move_lookback"    : 126,
-      "max_base_range_pct"     : 40,
-      "min_base_range_pct"     : 10,
-      "min_support_tests"      : 2,
-      "support_zone_pct"       : 3
+      "min_base_days": 30,
+      "max_base_days": 120,
+      "max_from_base_high_pct": 5,
+      "min_prior_move_pct": 30,
+      "prior_move_lookback": 126,
+      "max_base_range_pct": 40,
+      "min_base_range_pct": 10,
+      "min_support_tests": 2,
+      "support_zone_pct": 3
+    }
+  },
+  "market_signals": {
+    "weights": {
+      "quantitative": 60,
+      "qualitative": 40
+    },
+    "quantitative": {
+      "nifty_vs_20w_sma": {
+        "enabled": true,
+        "weight": 30,
+        "description": "Nifty 50 above 20-week SMA = broad uptrend"
+      },
+      "nifty_vs_50w_sma": {
+        "enabled": true,
+        "weight": 20,
+        "description": "Nifty 50 above 50-week SMA = long term trend intact"
+      },
+      "india_vix": {
+        "enabled": true,
+        "weight": 25,
+        "calm_below": 15,
+        "fearful_above": 20,
+        "description": "VIX below 15 = calm, above 20 = fearful"
+      },
+      "vix_direction": {
+        "enabled": true,
+        "weight": 10,
+        "description": "Falling VIX = fear reducing = bullish"
+      },
+      "nifty_momentum": {
+        "enabled": true,
+        "weight": 15,
+        "description": "Nifty 3M RS vs itself \u2014 is market accelerating"
+      }
+    },
+    "qualitative": {
+      "enabled": true,
+      "search_queries": {
+        "fii_dii_flows": {
+          "query": "FII DII flows Indian stock market this week",
+          "weight": 20,
+          "sectors": [
+            "ALL"
+          ]
+        },
+        "rbi_policy": {
+          "query": "RBI monetary policy interest rates India latest",
+          "weight": 15,
+          "sectors": [
+            "PSUBank",
+            "Realty",
+            "Auto",
+            "FMCG"
+          ]
+        },
+        "rupee_dollar": {
+          "query": "Indian rupee US dollar exchange rate trend",
+          "weight": 10,
+          "sectors": [
+            "IT",
+            "Pharma",
+            "Metal"
+          ]
+        },
+        "crude_oil": {
+          "query": "crude oil price trend impact India this week",
+          "weight": 10,
+          "sectors": [
+            "Energy",
+            "Auto",
+            "FMCG",
+            "Metal"
+          ]
+        },
+        "global_risk": {
+          "query": "global stock market risk sentiment this week",
+          "weight": 10,
+          "sectors": [
+            "IT",
+            "Metal",
+            "Pharma"
+          ]
+        },
+        "tariffs_trade": {
+          "query": "US China tariffs trade war import export duties India impact",
+          "weight": 10,
+          "sectors": [
+            "Metal",
+            "IT",
+            "Pharma",
+            "Auto"
+          ]
+        },
+        "geopolitical_war": {
+          "query": "geopolitical tensions war conflict impact emerging markets India",
+          "weight": 10,
+          "sectors": [
+            "Metal",
+            "Energy",
+            "Defence"
+          ]
+        },
+        "customs_duty_bans": {
+          "query": "India custom duty changes import export ban policy announcement",
+          "weight": 10,
+          "sectors": [
+            "Metal",
+            "Pharma",
+            "Auto",
+            "FMCG"
+          ]
+        },
+        "healthcare_virus": {
+          "query": "new virus outbreak health scare pandemic risk global India",
+          "weight": 5,
+          "sectors": [
+            "Pharma",
+            "Healthcare",
+            "FMCG"
+          ]
+        },
+        "domestic_policy": {
+          "query": "India government budget policy reform announcement this week",
+          "weight": 10,
+          "sectors": [
+            "PSE",
+            "CPSE",
+            "Infra",
+            "Realty"
+          ]
+        }
+      }
+    },
+    "regime_thresholds": {
+      "bull_score_min": 65,
+      "bear_score_max": 35
+    },
+    "prc_adjustments": {
+      "bull": -10,
+      "neutral": 0,
+      "bear": 15
+    },
+    "sector_macro_links": {
+      "Metal": [
+        "crude_oil",
+        "tariffs_trade",
+        "geopolitical_war",
+        "global_risk"
+      ],
+      "IT": [
+        "rupee_dollar",
+        "tariffs_trade",
+        "global_risk"
+      ],
+      "Energy": [
+        "crude_oil",
+        "geopolitical_war",
+        "domestic_policy"
+      ],
+      "PSUBank": [
+        "rbi_policy",
+        "domestic_policy"
+      ],
+      "Pharma": [
+        "rupee_dollar",
+        "healthcare_virus",
+        "customs_duty_bans",
+        "global_risk"
+      ],
+      "Auto": [
+        "crude_oil",
+        "rbi_policy",
+        "customs_duty_bans"
+      ],
+      "Realty": [
+        "rbi_policy",
+        "domestic_policy"
+      ],
+      "FMCG": [
+        "crude_oil",
+        "customs_duty_bans",
+        "healthcare_virus"
+      ],
+      "Infra": [
+        "domestic_policy",
+        "geopolitical_war"
+      ],
+      "PSE": [
+        "domestic_policy",
+        "fii_dii_flows"
+      ],
+      "CPSE": [
+        "domestic_policy",
+        "fii_dii_flows"
+      ],
+      "MNC": [
+        "tariffs_trade",
+        "global_risk"
+      ],
+      "Media": [
+        "domestic_policy",
+        "fii_dii_flows"
+      ],
+      "Commodities": [
+        "crude_oil",
+        "tariffs_trade",
+        "geopolitical_war"
+      ],
+      "Consumption": [
+        "rbi_policy",
+        "customs_duty_bans",
+        "healthcare_virus"
+      ],
+      "Services": [
+        "global_risk",
+        "rupee_dollar"
+      ],
+      "Bank": [
+        "rbi_policy",
+        "fii_dii_flows"
+      ]
     }
   }
 }
