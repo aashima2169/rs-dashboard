@@ -21,7 +21,7 @@ jobs:
         run: |
           pip install requests pandas yfinance numpy supabase google-genai
 
-      # ── Step 1: Scout Agent (RS scoring + drift + Supabase) ───────────────
+      # ── Step 1: Scout Agent ───────────────────────────────────────────────
       - name: Run Scout Agent
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -30,11 +30,13 @@ jobs:
           SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
         run: python agent.py
 
-      # ── Step 2: Macro Agent (market context + Gemini + enriched Telegram) ──
+      # ── Step 2: Macro Agent ───────────────────────────────────────────────
       - name: Run Macro Agent
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
           GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
         run: python macro_agent.py
 
