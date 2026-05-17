@@ -52,6 +52,7 @@ def build_prompt(quant_score, signal_summary, sector_scores, config):
     for key, q in queries.items():
         topics_text += f"  {key} (weight:{q['weight']}): {q['query']}\n"
 
+    today_date = date.today().strftime("%d %b %Y")
     return f"""
 You are an expert Indian equity market analyst.
 Today is {date.today().strftime('%d %b %Y')}.
@@ -91,7 +92,19 @@ Based on findings and quantitative signals, return ONLY valid JSON:
   "summary"      : "line 1. line 2."
 }}
 
+IMPORTANT INSTRUCTIONS:
+- Only use news from the last 14 days. Today is {today_date}.
+- If no significant news exists for a topic in the last 14 days, return null for that topic.
+- Do NOT use articles older than 14 days.
+- Do NOT fabricate or assume news.
+
 Score 0-100: 0=very bearish, 50=neutral, 100=very bullish for Indian equities.
+For topics with recent news: return score + finding.
+For topics with no recent news: return null.
+
+Example of null topic:
+  "rbi_policy": null
+
 No markdown, no explanation, JSON only.
 """.strip()
 
@@ -103,8 +116,10 @@ def compute_qualitative_score(macro_scores, config):
     total_weight = 0
     weighted_sum = 0
     for key, q in queries.items():
-        weight        = q.get("weight", 10)
-        score         = macro_scores.get(key, {}).get("score", 50)
+        weight    = q.get("weight", 10)
+        val       = macro_scores.get(key)
+        # null topic = no recent news, treat as neutral 50 for scoring only
+        score     = val.get("score", 50) if val else 50
         weighted_sum += score * weight
         total_weight += weight
     return round(weighted_sum / total_weight) if total_weight else 50
