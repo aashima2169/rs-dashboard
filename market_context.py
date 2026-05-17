@@ -68,7 +68,7 @@ def get_vix_signal(cfg_quant: dict) -> dict:
     cfg_dir   = cfg_quant.get("vix_direction", {})
 
     try:
-        vix_series = get_weekly_close("^INDIAVIX", period="6m")
+        vix_series = get_weekly_close("^INDIAVIX", period="1y")
         if vix_series.empty:
             raise ValueError("Empty VIX data")
 
@@ -154,9 +154,11 @@ def get_market_context(config: dict) -> dict:
     # ── Download data ─────────────────────────────────────────────────────────
     print("  📥 Downloading Nifty 50 weekly data...")
     nifty_weekly = get_weekly_close("^NSEI", period="2y")
+    print(f"     Weekly rows: {len(nifty_weekly)} | Latest: {nifty_weekly.iloc[-1]:.0f}" if not nifty_weekly.empty else "     ⚠️ Weekly data empty")
 
     print("  📥 Downloading Nifty 50 daily data...")
     nifty_daily  = get_daily_close("^NSEI", period="1y")
+    print(f"     Daily rows: {len(nifty_daily)} | Latest: {nifty_daily.iloc[-1]:.0f}" if not nifty_daily.empty else "     ⚠️ Daily data empty")
 
     # ── Calculate signals ─────────────────────────────────────────────────────
     print("  🔢 Calculating SMA signals...")
