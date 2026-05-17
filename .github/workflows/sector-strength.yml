@@ -1,0 +1,35 @@
+name: Scout Agent — Sector RS Report
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 10 * * 0'   # Sunday 4:00 PM IST — weekly sector review
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install requests pandas yfinance numpy
+
+      - name: Run Scout Agent
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python agent.py
+
+      - name: Upload Sector Scores
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sector-scores
+          path: sector_scores.json
