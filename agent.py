@@ -1,14 +1,5 @@
 """
 agent.py  —  Scout Agent
-------------------------
-Calculates 3M and 6M Relative Strength of each sector vs Nifty 50.
-Ranks and categorises sectors into Strong / Mixed / Weak.
-
-Supabase integration:
-  - Writes this week's scores to sector_scores table
-  - Reads last 4 weeks for drift detection (momentum shifts)
-  - Reads 4-week-old calls for eval (did Strong sectors beat Nifty?)
-  - Writes eval results to eval_results table
 """
 
 import os
@@ -17,7 +8,6 @@ import requests
 import pandas as pd
 import yfinance as yf
 from datetime import date, timedelta
-from supabase import create_client, Client
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID        = os.environ.get("TELEGRAM_CHAT_ID")
@@ -29,13 +19,18 @@ TELEGRAM_LIMIT = 4000
 # ── Supabase client ───────────────────────────────────────────────────────────
 
 def get_supabase():
+    print(f"🔌 Supabase URL set: {bool(SUPABASE_URL)}")
+    print(f"🔌 Supabase KEY set: {bool(SUPABASE_KEY)}")
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("⚠️  Supabase env vars not set — skipping DB operations")
+        print("⚠️  Supabase env vars missing — all DB operations will be skipped")
         return None
     try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        from supabase import create_client
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("✅ Supabase client connected")
+        return client
     except Exception as e:
-        print(f"⚠️  Supabase connection failed: {e}")
+        print(f"❌ Supabase connection failed: {e}")
         return None
 
 
@@ -61,9 +56,9 @@ def format_pct(val):
     return f"{sign}{val:.1f}%"
 
 
-def send_telegram(msg):
+def send_telegram(msg, use_markdown=True):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print(f"⚠️  Telegram not set. TOKEN:{bool(TELEGRAM_TOKEN)} CHAT:{bool(CHAT_ID)}")
+        print(f"⚠️  Telegram not configured. TOKEN:{bool(TELEGRAM_TOKEN)} CHAT:{bool(CHAT_ID)}")
         return
     chunks = []
     while len(msg) > TELEGRAM_LIMIT:
@@ -76,22 +71,26 @@ def send_telegram(msg):
     print(f"📤 Sending {len(chunks)} Telegram message(s)...")
     for i, chunk in enumerate(chunks, 1):
         try:
+            payload = {"chat_id": CHAT_ID, "text": chunk}
+            if use_markdown:
+                payload["parse_mode"] = "Markdown"
             resp = requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                json={"chat_id": CHAT_ID, "text": chunk, "parse_mode": "Markdown"},
+                json=payload,
                 timeout=10,
             )
             if resp.status_code == 200:
                 print(f"   ✅ Message {i}/{len(chunks)} sent")
             else:
-                print(f"   ❌ Failed {i}: {resp.status_code} — {resp.text}")
+                print(f"   ❌ Message {i}/{len(chunks)} failed: {resp.status_code} — {resp.text}")
         except Exception as e:
-            print(f"   ❌ Exception {i}: {e}")
+            print(f"   ❌ Message {i}/{len(chunks)} exception: {e}")
 
 
 # ── Supabase operations ───────────────────────────────────────────────────────
 
 def write_scores(sb, results, scan_date):
+    print(f"\n💾 Writing {len(results)} scores to Supabase...")
     try:
         rows = [
             {
@@ -106,48 +105,60 @@ def write_scores(sb, results, scan_date):
             }
             for r in results
         ]
-        sb.table("sector_scores").insert(rows).execute()
-        print(f"✅ {len(rows)} scores written to Supabase")
+        response = sb.table("sector_scores").insert(rows).execute()
+        print(f"✅ Supabase write complete — {len(rows)} rows inserted")
+        print(f"   Response: {response}")
     except Exception as e:
-        print(f"⚠️  Write scores failed: {e}")
+        print(f"❌ Supabase write_scores failed: {type(e).__name__}: {e}")
 
 
 def read_history(sb, weeks=4):
+    print(f"\n📖 Reading last {weeks} weeks from Supabase...")
     try:
         since = str(date.today() - timedelta(weeks=weeks))
         resp  = sb.table("sector_scores").select("*").gte("scan_date", since).order("scan_date").execute()
+        rows  = len(resp.data) if resp.data else 0
+        print(f"✅ Read {rows} historical rows")
         return pd.DataFrame(resp.data) if resp.data else pd.DataFrame()
     except Exception as e:
-        print(f"⚠️  Read history failed: {e}")
+        print(f"❌ Supabase read_history failed: {type(e).__name__}: {e}")
         return pd.DataFrame()
 
 
 def read_calls_4_weeks_ago(sb):
+    print("\n📖 Reading calls from 4 weeks ago...")
     try:
         target = str(date.today() - timedelta(weeks=4))
-        resp   = sb.table("sector_scores").select("*").lte("scan_date", target).order("scan_date", desc=True).limit(50).execute()
+        resp   = sb.table("sector_scores").select("*").lte("scan_date", target)\
+                   .order("scan_date", desc=True).limit(50).execute()
         if resp.data:
             df     = pd.DataFrame(resp.data)
             latest = df["scan_date"].max()
-            return df[df["scan_date"] == latest]
+            result = df[df["scan_date"] == latest]
+            print(f"✅ Found {len(result)} calls from {latest}")
+            return result
+        print("ℹ️  No data found from 4 weeks ago")
         return pd.DataFrame()
     except Exception as e:
-        print(f"⚠️  Read old calls failed: {e}")
+        print(f"❌ Supabase read_calls_4_weeks_ago failed: {type(e).__name__}: {e}")
         return pd.DataFrame()
 
 
 def write_eval(sb, eval_rows):
+    print(f"\n💾 Writing {len(eval_rows)} eval results to Supabase...")
     try:
-        sb.table("eval_results").insert(eval_rows).execute()
-        print(f"✅ {len(eval_rows)} eval results written to Supabase")
+        response = sb.table("eval_results").insert(eval_rows).execute()
+        print(f"✅ Eval write complete")
+        print(f"   Response: {response}")
     except Exception as e:
-        print(f"⚠️  Write eval failed: {e}")
+        print(f"❌ Supabase write_eval failed: {type(e).__name__}: {e}")
 
 
 # ── Drift detection ───────────────────────────────────────────────────────────
 
 def detect_drift(current_df, history_df):
     if history_df.empty:
+        print("ℹ️  No history for drift detection yet")
         return []
     past = history_df[history_df["scan_date"] < str(date.today())]
     if past.empty:
@@ -168,16 +179,17 @@ def detect_drift(current_df, history_df):
 
         if cat_now != cat_prev:
             if cat_now == "STRONG":
-                shifts.append(f"🚨 *{sector}*: {cat_prev} → STRONG")
+                shifts.append(f"🚨 *{sector}*: {cat_prev} to STRONG")
             elif cat_now == "WEAK":
-                shifts.append(f"🚨 *{sector}*: {cat_prev} → WEAK")
+                shifts.append(f"🚨 *{sector}*: {cat_prev} to WEAK")
             else:
-                shifts.append(f"🔄 *{sector}*: {cat_prev} → {cat_now}")
+                shifts.append(f"🔄 *{sector}*: {cat_prev} to {cat_now}")
         elif delta >= 10:
-            shifts.append(f"⚡ *{sector}*: PRC {prc_prev}→{prc_now} (+{delta})")
+            shifts.append(f"⚡ *{sector}*: PRC {prc_prev} to {prc_now} (+{delta})")
         elif delta <= -10:
-            shifts.append(f"📉 *{sector}*: PRC {prc_prev}→{prc_now} ({delta})")
+            shifts.append(f"📉 *{sector}*: PRC {prc_prev} to {prc_now} ({delta})")
 
+    print(f"✅ Drift detection: {len(shifts)} shifts found")
     return shifts
 
 
@@ -186,16 +198,15 @@ def detect_drift(current_df, history_df):
 def run_eval(sb, sector_tickers, bm_data):
     old_calls = read_calls_4_weeks_ago(sb)
     if old_calls.empty:
-        print("ℹ️  No calls from 4 weeks ago — skipping eval")
         return [], None
 
     call_date    = old_calls["scan_date"].iloc[0]
     strong_calls = old_calls[old_calls["category"] == "STRONG"]
     if strong_calls.empty:
-        print("ℹ️  No Strong calls from 4 weeks ago — skipping eval")
+        print("ℹ️  No Strong calls from 4 weeks ago")
         return [], None
 
-    print(f"\n📋 Evaluating {len(strong_calls)} Strong calls from {call_date}...")
+    print(f"📋 Evaluating {len(strong_calls)} Strong calls from {call_date}...")
     eval_rows = []
     hits      = 0
 
@@ -221,7 +232,7 @@ def run_eval(sb, sector_tickers, bm_data):
             })
             print(f"   {'✅' if beat_nifty else '❌'} {sector}: {sector_return:+.1f}% vs Nifty {nifty_return:+.1f}%")
         except Exception as e:
-            print(f"   ⚠️  Eval error {sector}: {e}")
+            print(f"   ❌ Eval error {sector}: {type(e).__name__}: {e}")
 
     hit_rate = round(hits / len(eval_rows) * 100) if eval_rows else None
     return eval_rows, hit_rate
@@ -239,7 +250,7 @@ def run_agent():
     today          = str(date.today())
     sb             = get_supabase()
 
-    print(f"📂 Scanning {len(sector_tickers)} sectors...\n")
+    print(f"\n📂 Scanning {len(sector_tickers)} sectors...\n")
 
     bm_data = get_close("^NSEI")
     if bm_data.empty:
@@ -262,12 +273,13 @@ def run_agent():
             p6  = round(((rs.iloc[-1] / rs.iloc[-126]) - 1) * 100, 1) if len(rs) >= 126 else None
             r3  = round(calc_percentile(rs.pct_change(63).tail(252)))  if p3 is not None else 0
             r6  = round(calc_percentile(rs.pct_change(126).tail(252))) if p6 is not None else 0
-            results.append({"name": name, "ticker": ticker, "p3": p3, "p6": p6, "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
+            results.append({"name": name, "ticker": ticker, "p3": p3, "p6": p6,
+                            "r3": r3, "r6": r6, "prc": round((r3+r6)/2)})
         except Exception as e:
-            print(f"     ⚠️  Error: {e}")
+            print(f"     ❌ Error: {type(e).__name__}: {e}")
 
     if not results:
-        print("❌ No results")
+        print("❌ No results — check tickers in config.json")
         return
 
     df = pd.DataFrame(results).sort_values("prc", ascending=False)
@@ -285,20 +297,20 @@ def run_agent():
 
     results = df.to_dict(orient="records")
 
-    # ── Eval (before writing new scores) ─────────────────────────────────────
+    # ── Eval ─────────────────────────────────────────────────────────────────
     eval_rows, hit_rate = [], None
     if sb:
         eval_rows, hit_rate = run_eval(sb, sector_tickers, bm_data)
         if eval_rows:
             write_eval(sb, eval_rows)
 
-    # ── Drift detection ───────────────────────────────────────────────────────
+    # ── Drift ─────────────────────────────────────────────────────────────────
     shifts = []
     if sb:
         history_df = read_history(sb, weeks=4)
         shifts     = detect_drift(df, history_df)
 
-    # ── Write this week's scores ──────────────────────────────────────────────
+    # ── Write scores ──────────────────────────────────────────────────────────
     if sb:
         write_scores(sb, results, today)
 
@@ -313,25 +325,26 @@ def run_agent():
     # ── Telegram messages ─────────────────────────────────────────────────────
     today_fmt = date.today().strftime("%d %b %Y")
 
-    # Message 1 — Strong + Mixed
-    msg1 = f"📊 *SECTOR RS REPORT — {today_fmt}*\n\n"
-    msg1 += "`SECTOR           PRC   3M RS   6M RS`\n"
-    msg1 += "`──────────────────────────────────`\n"
+    # Message 1 — Strong + Mixed (mobile-friendly: one line per sector)
+    msg1 = f"📊 *SECTOR RS REPORT — {today_fmt}*\n"
     for cat, emoji, label in [("STRONG", "🟢", "STRONG"), ("MIXED", "🟡", "MIXED")]:
         rows = df[df["category"] == cat]
-        if rows.empty: continue
+        if rows.empty:
+            continue
         msg1 += f"\n{emoji} *{label}*\n"
         for _, r in rows.iterrows():
-            msg1 += f"`{r['name'][:14].ljust(14)}  {str(r['prc']).rjust(3)}  {format_pct(r['p3'])}  {format_pct(r['p6'])}`\n"
+            name = r["name"][:12]
+            msg1 += f"`{name}` PRC:{r['prc']}  3M:{format_pct(r['p3'])}  6M:{format_pct(r['p6'])}\n"
 
-    # Message 2 — Weak
-    msg2 = f"📊 *SECTOR RS REPORT — {today_fmt} (cont.)*\n\n"
+    # Message 2 — Weak (plain text, no Markdown)
     weak = df[df["category"] == "WEAK"]
+    msg2 = f"📊 SECTOR RS REPORT — {today_fmt} (cont.)\n"
     if not weak.empty:
-        msg2 += "🔴 *WEAK*\n"
+        msg2 += "\n🔴 WEAK\n"
         for _, r in weak.iterrows():
-            msg2 += f"`{r['name'][:14].ljust(14)}  {str(r['prc']).rjust(3)}  {format_pct(r['p3'])}  {format_pct(r['p6'])}`\n"
-    msg2 += "\n_Review · set active\\_sectors.json · trigger Sniper_"
+            name = r["name"][:12]
+            msg2 += f"{name}  PRC:{r['prc']}  3M:{format_pct(r['p3'])}  6M:{format_pct(r['p6'])}\n"
+    msg2 += "\nReview above and trigger Sniper manually."
 
     # Message 3 — Momentum shifts
     msg3 = ""
@@ -349,7 +362,7 @@ def run_agent():
             msg4 += f"\n*Hit Rate: {hit_rate}%* 🎯"
 
     send_telegram(msg1)
-    send_telegram(msg2)
+    send_telegram(msg2, use_markdown=False)
     if msg3: send_telegram(msg3)
     if msg4: send_telegram(msg4)
 
