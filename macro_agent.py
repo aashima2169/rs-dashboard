@@ -266,6 +266,7 @@ def run_macro_agent():
     print("💾 macro_output.json saved")
 
     # ── Send macro summary + findings ────────────────────────────────────────
+    today_fmt = date.today().strftime("%d %b %Y")
     summary      = decision.get("summary", "").strip()
     regime       = decision.get("regime", "NEUTRAL")
     macro_scores = decision.get("macro_scores", {})
