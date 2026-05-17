@@ -190,14 +190,19 @@ def build_messages(decision: dict, adjusted: dict, context: dict) -> list:
 
     # ── Message 3 — Macro findings breakdown ─────────────────────────────────
     macro_scores = decision.get("macro_scores", {})
-    msg3 = f"📰 MACRO FINDINGS — {today_fmt}\n\n"
 
-    for key, val in macro_scores.items():
-        score   = val.get("score", "?")
-        finding = val.get("finding", "No data")
-        bar     = "🟢" if score >= 65 else "🔴" if score <= 35 else "🟡"
-        label   = key.replace("_", " ").title()
-        msg3   += f"{bar} {label} ({score})\n{finding}\n\n"
+    # Only include topics with recent news (non-null)
+    active_topics = {k: v for k, v in macro_scores.items() if v is not None}
+
+    msg3 = ""
+    if active_topics:
+        msg3 = f"📰 MACRO FINDINGS — {today_fmt}\n\n"
+        for key, val in active_topics.items():
+            score   = val.get("score", "?")
+            finding = val.get("finding", "No data")
+            bar     = "🟢" if isinstance(score, int) and score >= 65 else "🔴" if isinstance(score, int) and score <= 35 else "🟡"
+            label   = key.replace("_", " ").title()
+            msg3   += f"{bar} {label} ({score})\n{finding}\n\n"
 
     return [msg1, msg2, msg3]
 
@@ -262,7 +267,8 @@ def run_macro_agent():
 
     send_telegram(messages[0])                        # regime + actionable (markdown)
     send_telegram(messages[1], use_markdown=False)    # flags + suppressions (plain)
-    send_telegram(messages[2], use_markdown=False)    # macro findings (plain)
+    if messages[2]:                                   # only send if there are active findings
+        send_telegram(messages[2], use_markdown=False)
 
     print("\n✅ Macro agent complete.")
 
