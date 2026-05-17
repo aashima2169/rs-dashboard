@@ -325,26 +325,39 @@ def run_agent():
     # ── Telegram messages ─────────────────────────────────────────────────────
     today_fmt = date.today().strftime("%d %b %Y")
 
-    # Message 1 — Strong + Mixed (mobile-friendly: one line per sector)
-    msg1 = f"📊 *SECTOR RS REPORT — {today_fmt}*\n"
+    # Message 1 — Strong + Mixed
+    # Compact table: name(9) prc(3) 3m(6) 6m(6) = ~28 chars, fits mobile
+    def fmt_row(r):
+        name = r["name"][:9].ljust(9)
+        prc  = str(r["prc"]).rjust(3)
+        p3   = format_pct(r["p3"]).strip().rjust(6)
+        p6   = format_pct(r["p6"]).strip().rjust(6)
+        return f"`{name} {prc} {p3} {p6}`"
+
+    msg1  = f"📊 *SECTOR RS — {today_fmt}*\n"
+    msg1 += "`         PRC     3M     6M`\n"
+
     for cat, emoji, label in [("STRONG", "🟢", "STRONG"), ("MIXED", "🟡", "MIXED")]:
         rows = df[df["category"] == cat]
         if rows.empty:
             continue
         msg1 += f"\n{emoji} *{label}*\n"
         for _, r in rows.iterrows():
-            name = r["name"][:12]
-            msg1 += f"`{name}` PRC:{r['prc']}  3M:{format_pct(r['p3'])}  6M:{format_pct(r['p6'])}\n"
+            msg1 += fmt_row(r) + "\n"
 
     # Message 2 — Weak (plain text, no Markdown)
     weak = df[df["category"] == "WEAK"]
-    msg2 = f"📊 SECTOR RS REPORT — {today_fmt} (cont.)\n"
+    msg2  = f"📊 SECTOR RS — {today_fmt} (cont.)\n"
+    msg2 += "          PRC     3M     6M\n"
     if not weak.empty:
         msg2 += "\n🔴 WEAK\n"
         for _, r in weak.iterrows():
-            name = r["name"][:12]
-            msg2 += f"{name}  PRC:{r['prc']}  3M:{format_pct(r['p3'])}  6M:{format_pct(r['p6'])}\n"
-    msg2 += "\nReview above and trigger Sniper manually."
+            name = r["name"][:9].ljust(9)
+            prc  = str(r["prc"]).rjust(3)
+            p3   = format_pct(r["p3"]).strip().rjust(6)
+            p6   = format_pct(r["p6"]).strip().rjust(6)
+            msg2 += f"{name} {prc} {p3} {p6}\n"
+    msg2 += "\nReview and trigger Sniper manually."
 
     # Message 3 — Momentum shifts
     msg3 = ""
