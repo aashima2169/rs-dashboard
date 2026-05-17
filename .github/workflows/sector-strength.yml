@@ -19,7 +19,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests pandas yfinance numpy supabase google-generativeai
+          pip install requests pandas yfinance numpy supabase google-genai
 
       # ── Step 1: Scout Agent (RS scoring + drift + Supabase) ───────────────
       - name: Run Scout Agent
