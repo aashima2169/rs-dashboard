@@ -8,11 +8,8 @@ Flow:
   1. Reads sector_scores.json (written by agent.py)
   2. Fetches quantitative signals via market_context.py
   3. Calls Gemini for macro analysis via llm_decision.py
-  4. Applies regime decision to sector scores
-  5. Sends enriched Telegram report
-
-Does not touch Supabase or recalculate RS scores.
-Reads agent.py output, adds macro layer, sends Telegram.
+  4. Writes macro_summaries + macro_findings to Supabase
+  5. Sends Telegram messages
 """
 
 import os
@@ -25,16 +22,77 @@ from llm_decision   import get_llm_decision
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID        = os.environ.get("TELEGRAM_CHAT_ID")
+SUPABASE_URL   = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY   = os.environ.get("SUPABASE_KEY")
 TELEGRAM_LIMIT = 4000
+BASE_PRC_THRESHOLD = 40
 
-BASE_PRC_THRESHOLD = 40   # default threshold, adjusted by regime
+
+# ── Supabase ──────────────────────────────────────────────────────────────────
+
+def get_supabase():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("⚠️  Supabase env vars not set — skipping DB writes")
+        return None
+    try:
+        from supabase import create_client
+        client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("✅ Supabase connected")
+        return client
+    except Exception as e:
+        print(f"❌ Supabase connection failed: {e}")
+        return None
+
+
+def write_macro_summary(sb, decision: dict, context: dict, scan_date: str):
+    """Writes regime, scores and summary to macro_summaries table."""
+    try:
+        row = {
+            "scan_date"   : scan_date,
+            "regime"      : decision.get("regime"),
+            "final_score" : decision.get("final_score"),
+            "quant_score" : decision.get("quant_score"),
+            "qual_score"  : decision.get("qual_score"),
+            "summary"     : decision.get("summary", ""),
+            "vix"         : context["vix_signal"].get("vix_now"),
+            "nifty_3m"    : context["mom_signal"].get("nifty_3m_return"),
+            "above_20w"   : context["sma_signal"].get("above_20w"),
+            "above_50w"   : context["sma_signal"].get("above_50w"),
+        }
+        sb.table("macro_summaries").insert(row).execute()
+        print("✅ macro_summaries written")
+    except Exception as e:
+        print(f"❌ write_macro_summary failed: {type(e).__name__}: {e}")
+
+
+def write_macro_findings(sb, macro_scores: dict, scan_date: str):
+    """Writes individual macro topic findings to macro_findings table."""
+    try:
+        rows = []
+        for topic, val in macro_scores.items():
+            if val is None:
+                continue
+            score     = val.get("score", 50)
+            sentiment = "BULLISH" if score >= 65 else "BEARISH" if score <= 35 else "NEUTRAL"
+            rows.append({
+                "scan_date" : scan_date,
+                "topic"     : topic,
+                "score"     : score,
+                "finding"   : val.get("finding", ""),
+                "sentiment" : sentiment,
+            })
+        if rows:
+            sb.table("macro_findings").insert(rows).execute()
+            print(f"✅ macro_findings written ({len(rows)} topics)")
+    except Exception as e:
+        print(f"❌ write_macro_findings failed: {type(e).__name__}: {e}")
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
 def send_telegram(msg, use_markdown=True):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print(f"⚠️  Telegram not configured.")
+        print("⚠️  Telegram not configured.")
         return
     chunks = []
     while len(msg) > TELEGRAM_LIMIT:
@@ -63,45 +121,27 @@ def send_telegram(msg, use_markdown=True):
             print(f"   ❌ Exception {i}: {e}")
 
 
-# ── Apply decision to sectors ─────────────────────────────────────────────────
+# ── Apply decision ────────────────────────────────────────────────────────────
 
-def apply_decision(sector_scores: list, decision: dict, config: dict) -> dict:
-    """
-    Applies regime decision to sector scores:
-      - Adjusts effective PRC threshold
-      - Marks sectors with tailwind (flag despite weak RS)
-      - Marks sectors with headwind (suppress despite strong RS)
-
-    Returns dict with adjusted sector lists.
-    """
+def apply_decision(sector_scores: list, decision: dict) -> dict:
     prc_adj   = decision.get("prc_adjustment", 0)
     threshold = BASE_PRC_THRESHOLD + prc_adj
-
     tailwinds = {t["sector"]: t["reason"] for t in decision["sector_flags"].get("tailwind", [])}
     headwinds = {h["sector"]: h["reason"] for h in decision["sector_flags"].get("headwind", [])}
 
-    actionable  = []   # Strong RS + passes threshold + no headwind
-    flagged     = []   # Weak/Mixed RS but has macro tailwind
-    suppressed  = []   # Strong RS but has macro headwind
-    watch       = []   # Strong RS, passes threshold, minor note
+    actionable, flagged, suppressed, watch = [], [], [], []
 
     for r in sector_scores:
         sector   = r["name"]
         prc      = r["prc"]
         category = r["category"]
 
-        has_tailwind = sector in tailwinds
-        has_headwind = sector in headwinds
-
-        if has_headwind and category == "STRONG":
+        if sector in headwinds and category == "STRONG":
             suppressed.append({**r, "reason": headwinds[sector]})
-
-        elif has_tailwind and category != "STRONG":
+        elif sector in tailwinds and category != "STRONG":
             flagged.append({**r, "reason": tailwinds[sector]})
-
         elif category == "STRONG" and prc >= threshold:
             actionable.append(r)
-
         elif category == "STRONG" and prc < threshold:
             watch.append(r)
 
@@ -114,127 +154,28 @@ def apply_decision(sector_scores: list, decision: dict, config: dict) -> dict:
     }
 
 
-# ── Build Telegram messages ───────────────────────────────────────────────────
-
-def build_messages(decision: dict, adjusted: dict, context: dict) -> list:
-    """
-    Builds up to 3 Telegram messages:
-      1. Regime + macro summary + actionable sectors
-      2. Flagged (tailwind) + suppressed (headwind) sectors
-      3. Macro signal breakdown (key findings per topic)
-    """
-    today_fmt  = date.today().strftime("%d %b %Y")
-    regime     = decision["regime"]
-    score      = decision["final_score"]
-    threshold  = adjusted["threshold"]
-    prc_adj    = decision["prc_adjustment"]
-
-    regime_emoji = {"BULL": "🐂", "NEUTRAL": "⚖️", "BEAR": "🐻"}.get(regime, "❓")
-
-    # ── Message 1 — Regime + Actionable sectors ───────────────────────────────
-    msg1  = f"🤖 *MACRO OVERLAY — {today_fmt}*\n\n"
-    msg1 += f"{regime_emoji} *Regime: {regime}* (score: {score}/100)\n"
-    msg1 += f"_{decision.get('regime_reason', '')}_\n\n"
-
-    # Market context summary from Gemini
-    summary = decision.get("summary", "")
-    if summary:
-        msg1 += f"📰 {summary}\n\n"
-
-    # Quantitative signals snapshot
-    vix   = context["vix_signal"]
-    mom   = context["mom_signal"]
-    sma   = context["sma_signal"]
-    msg1 += f"`Nifty vs 20W SMA : {'✅ ABOVE' if sma['above_20w'] else '❌ BELOW'} ({sma['pct_from_20w']:+.1f}%)`\n"
-    msg1 += f"`Nifty vs 50W SMA : {'✅ ABOVE' if sma['above_50w'] else '❌ BELOW'} ({sma['pct_from_50w']:+.1f}%)`\n"
-    msg1 += f"`India VIX        : {vix['vix_now']} ({'⬆️ rising' if vix['vix_rising'] else '⬇️ falling'})`\n"
-    msg1 += f"`Nifty 3M Return  : {mom['nifty_3m_return']:+.1f}%`\n\n"
-
-    # Adjusted threshold note
-    if prc_adj != 0:
-        direction = "lowered" if prc_adj < 0 else "raised"
-        msg1 += f"_PRC threshold {direction} to {threshold} ({prc_adj:+d} for {regime} regime)_\n\n"
-
-    # Actionable sectors
-    if adjusted["actionable"]:
-        msg1 += f"✅ *ACTIONABLE — PRC ≥ {threshold}*\n"
-        for r in adjusted["actionable"]:
-            p3 = f"{r.get('p3', 0):+.1f}%" if r.get('p3') is not None else "N/A"
-            p6 = f"{r.get('p6', 0):+.1f}%" if r.get('p6') is not None else "N/A"
-            msg1 += f"`{r['name'][:10].ljust(10)} PRC:{r['prc']:>3}  3M:{p3}  6M:{p6}`\n"
-    else:
-        msg1 += "ℹ️ No sectors meet the adjusted threshold this week.\n"
-
-    # ── Message 2 — Flags + Suppressions (plain text) ────────────────────────
-    msg2 = f"🤖 MACRO OVERLAY — {today_fmt} (cont.)\n\n"
-
-    if adjusted["flagged"]:
-        msg2 += "⚡ MACRO TAILWIND (watch despite weak RS)\n"
-        for r in adjusted["flagged"]:
-            msg2 += f"{r['name']}: {r['reason']}\n"
-        msg2 += "\n"
-
-    if adjusted["suppressed"]:
-        msg2 += "⚠️  MACRO HEADWIND (caution despite strong RS)\n"
-        for r in adjusted["suppressed"]:
-            msg2 += f"{r['name']}: {r['reason']}\n"
-        msg2 += "\n"
-
-    if adjusted["watch"]:
-        msg2 += f"👀 WATCH (Strong but PRC below {threshold})\n"
-        for r in adjusted["watch"]:
-            msg2 += f"{r['name']}  PRC:{r['prc']}\n"
-
-    if not any([adjusted["flagged"], adjusted["suppressed"], adjusted["watch"]]):
-        msg2 += "No additional flags this week."
-
-    # ── Message 3 — Macro findings breakdown ─────────────────────────────────
-    macro_scores = decision.get("macro_scores", {})
-
-    # Only include topics with recent news (non-null)
-    active_topics = {k: v for k, v in macro_scores.items() if v is not None}
-
-    msg3 = ""
-    if active_topics:
-        msg3 = f"📰 MACRO FINDINGS — {today_fmt}\n"
-        for key, val in active_topics.items():
-            score   = val.get("score", 50)
-            finding = val.get("finding", "")
-            # Truncate finding to first sentence, max 60 chars
-            short   = finding.split(".")[0].strip()
-            short   = short[:60] + "…" if len(short) > 60 else short
-            bar     = "🟢" if isinstance(score, int) and score >= 65 else "🔴" if isinstance(score, int) and score <= 35 else "🟡"
-            label   = key.replace("_", " ").title()[:14].ljust(14)
-            msg3   += f"{bar} {label}  {short}\n"
-
-    return [msg1, msg2, msg3]
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run_macro_agent():
     print("\n🤖 --- MACRO AGENT START ---")
 
-    # ── Load config ───────────────────────────────────────────────────────────
     with open("config.json", "r") as f:
         config = json.load(f)
 
-    # ── Read sector scores from agent.py output ───────────────────────────────
     try:
         with open("sector_scores.json", "r") as f:
             sector_scores = json.load(f)
-        print(f"📂 Loaded {len(sector_scores)} sector scores from sector_scores.json")
+        print(f"📂 Loaded {len(sector_scores)} sector scores")
     except FileNotFoundError:
         print("❌ sector_scores.json not found — run agent.py first")
         return
-    except Exception as e:
-        print(f"❌ Failed to load sector_scores.json: {e}")
-        return
 
-    # ── Get quantitative market context ───────────────────────────────────────
-    context = get_market_context(config)
+    today     = str(date.today())
+    today_fmt = date.today().strftime("%d %b %Y")
+    sb        = get_supabase()
 
-    # ── Get LLM macro decision ────────────────────────────────────────────────
+    # ── Market context + LLM decision ────────────────────────────────────────
+    context  = get_market_context(config)
     decision = get_llm_decision(
         quant_score    = context["quant_score"],
         signal_summary = context["signal_summary"],
@@ -242,56 +183,46 @@ def run_macro_agent():
         config         = config,
     )
 
-    # ── Apply decision to sectors ─────────────────────────────────────────────
-    adjusted = apply_decision(sector_scores, decision, config)
+    # ── Apply decision ────────────────────────────────────────────────────────
+    adjusted     = apply_decision(sector_scores, decision)
+    macro_scores = decision.get("macro_scores", {})
+    active       = {k: v for k, v in macro_scores.items() if v is not None}
+    regime       = decision.get("regime", "NEUTRAL")
+    summary      = decision.get("summary", "").strip()
+    regime_emoji = {"BULL": "🐂", "NEUTRAL": "⚖️", "BEAR": "🐻"}.get(regime, "❓")
 
-    print(f"\n📊 Regime: {decision['regime']} | Score: {decision['final_score']}/100")
-    print(f"   Threshold: {adjusted['threshold']} (base {BASE_PRC_THRESHOLD} {decision['prc_adjustment']:+d})")
-    print(f"   Actionable: {len(adjusted['actionable'])} sectors")
-    print(f"   Flagged:    {len(adjusted['flagged'])} sectors")
-    print(f"   Suppressed: {len(adjusted['suppressed'])} sectors")
+    print(f"\n📊 Regime: {regime} | Score: {decision['final_score']}/100")
+    print(f"   Threshold : {adjusted['threshold']}")
+    print(f"   Actionable: {len(adjusted['actionable'])} | Flagged: {len(adjusted['flagged'])} | Suppressed: {len(adjusted['suppressed'])}")
 
-    # ── Save macro output ─────────────────────────────────────────────────────
-    output = {
-        "decision": decision,
-        "adjusted": adjusted,
-        "context" : {
-            "quant_score"   : context["quant_score"],
-            "signal_summary": context["signal_summary"],
-        },
-        "scan_date": str(date.today()),
-    }
+    # ── Write to Supabase ─────────────────────────────────────────────────────
+    if sb:
+        write_macro_summary(sb, decision, context, today)
+        write_macro_findings(sb, macro_scores, today)
+
+    # ── Save local backup ─────────────────────────────────────────────────────
     with open("macro_output.json", "w") as f:
-        json.dump(output, f, indent=2, default=str)
+        json.dump({"decision": decision, "adjusted": adjusted,
+                   "context": {"quant_score": context["quant_score"]},
+                   "scan_date": today}, f, indent=2, default=str)
     print("💾 macro_output.json saved")
 
-    # ── Send macro summary + findings ────────────────────────────────────────
-    today_fmt = date.today().strftime("%d %b %Y")
-    summary      = decision.get("summary", "").strip()
-    regime       = decision.get("regime", "NEUTRAL")
-    macro_scores = decision.get("macro_scores", {})
-    regime_emoji = {"BULL": "🐂", "NEUTRAL": "⚖️", "BEAR": "🐻"}.get(regime, "❓")
-    active_topics = {k: v for k, v in macro_scores.items() if v is not None}
-
-    # Message 4 — One line macro summary
+    # ── Telegram Message 4 — Macro summary ───────────────────────────────────
     if summary:
         msg4 = f"{regime_emoji} *Macro ({regime}):* {summary}"
         send_telegram(msg4)
-        print(f"\n📤 Macro summary sent")
 
-    # Message 5 — Macro findings (crisp, one line per topic)
-    if active_topics:
+    # ── Telegram Message 5 — Macro findings ──────────────────────────────────
+    if active:
         msg5 = f"📰 Macro Findings — {today_fmt}\n"
-        for key, val in active_topics.items():
+        for key, val in active.items():
             score   = val.get("score", 50)
             finding = val.get("finding", "")
-            short   = finding.split(".")[0].strip()
-            short   = short[:60] + "…" if len(short) > 60 else short
+            short   = finding.replace(";", ".").split(".")[0].strip()
             bar     = "🟢" if isinstance(score, int) and score >= 65 else "🔴" if isinstance(score, int) and score <= 35 else "🟡"
-            label   = key.replace("_", " ").title()[:14].ljust(14)
-            msg5   += f"{bar} {label}  {short}\n"
+            label   = key.replace("_", " ").title()[:12]
+            msg5   += f"{bar} {label}: {short}\n"
         send_telegram(msg5, use_markdown=False)
-        print("📤 Macro findings sent")
 
     print("\n✅ Macro agent complete.")
 
