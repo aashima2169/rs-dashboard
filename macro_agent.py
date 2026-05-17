@@ -196,13 +196,16 @@ def build_messages(decision: dict, adjusted: dict, context: dict) -> list:
 
     msg3 = ""
     if active_topics:
-        msg3 = f"📰 MACRO FINDINGS — {today_fmt}\n\n"
+        msg3 = f"📰 MACRO FINDINGS — {today_fmt}\n"
         for key, val in active_topics.items():
-            score   = val.get("score", "?")
-            finding = val.get("finding", "No data")
+            score   = val.get("score", 50)
+            finding = val.get("finding", "")
+            # Truncate finding to first sentence, max 60 chars
+            short   = finding.split(".")[0].strip()
+            short   = short[:60] + "…" if len(short) > 60 else short
             bar     = "🟢" if isinstance(score, int) and score >= 65 else "🔴" if isinstance(score, int) and score <= 35 else "🟡"
-            label   = key.replace("_", " ").title()
-            msg3   += f"{bar} {label} ({score})\n{finding}\n\n"
+            label   = key.replace("_", " ").title()[:14].ljust(14)
+            msg3   += f"{bar} {label}  {short}\n"
 
     return [msg1, msg2, msg3]
 
@@ -262,13 +265,32 @@ def run_macro_agent():
         json.dump(output, f, indent=2, default=str)
     print("💾 macro_output.json saved")
 
-    # ── Build and send Telegram messages ──────────────────────────────────────
-    messages = build_messages(decision, adjusted, context)
+    # ── Send macro summary + findings ────────────────────────────────────────
+    summary      = decision.get("summary", "").strip()
+    regime       = decision.get("regime", "NEUTRAL")
+    macro_scores = decision.get("macro_scores", {})
+    regime_emoji = {"BULL": "🐂", "NEUTRAL": "⚖️", "BEAR": "🐻"}.get(regime, "❓")
+    active_topics = {k: v for k, v in macro_scores.items() if v is not None}
 
-    send_telegram(messages[0])                        # regime + actionable (markdown)
-    send_telegram(messages[1], use_markdown=False)    # flags + suppressions (plain)
-    if messages[2]:                                   # only send if there are active findings
-        send_telegram(messages[2], use_markdown=False)
+    # Message 4 — One line macro summary
+    if summary:
+        msg4 = f"{regime_emoji} *Macro ({regime}):* {summary}"
+        send_telegram(msg4)
+        print(f"\n📤 Macro summary sent")
+
+    # Message 5 — Macro findings (crisp, one line per topic)
+    if active_topics:
+        msg5 = f"📰 Macro Findings — {today_fmt}\n"
+        for key, val in active_topics.items():
+            score   = val.get("score", 50)
+            finding = val.get("finding", "")
+            short   = finding.split(".")[0].strip()
+            short   = short[:60] + "…" if len(short) > 60 else short
+            bar     = "🟢" if isinstance(score, int) and score >= 65 else "🔴" if isinstance(score, int) and score <= 35 else "🟡"
+            label   = key.replace("_", " ").title()[:14].ljust(14)
+            msg5   += f"{bar} {label}  {short}\n"
+        send_telegram(msg5, use_markdown=False)
+        print("📤 Macro findings sent")
 
     print("\n✅ Macro agent complete.")
 
