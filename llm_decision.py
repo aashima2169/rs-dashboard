@@ -118,14 +118,19 @@ Avoid these jargon terms — use plain alternatives instead:
   QoQ / MoM       → vs last quarter / vs last month
   liquidity       → available cash in the market
   sentiment       → mood / confidence of investors
-  headwind        → something making it harder
-  tailwind        → something helping it grow
+  headwind        → something making it harder / working against
+  tailwind        → something helping it grow / working in favour
+  equities        → stocks
+  Indian equities → Indian stocks
 
 For topics with no recent news in last 14 days: return null.
 
 For "summary": write ONE sentence (max 20 words) that tells a trader what to do 
 this week. Be specific with numbers. Plain English. No jargon.
-Example: "FIIs selling and crude at $106 — be cautious, only hold Pharma and FMCG this week."
+Start with either "POSITIVE —", "NEGATIVE —", or "NEUTRAL —" based on overall conditions.
+Example: "NEGATIVE — Crude at $106 and rupee falling; stick to Pharma and FMCG this week."
+Example: "POSITIVE — FIIs buying and markets rising; good week to be in Metal and Energy."
+Example: "NEUTRAL — Mixed signals this week; focus on strong sectors, avoid weak ones."
 
 Example of null topic:
   "rbi_policy": null
