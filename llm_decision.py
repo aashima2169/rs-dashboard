@@ -99,13 +99,33 @@ IMPORTANT INSTRUCTIONS:
 - Do NOT fabricate or assume news.
 
 Score 0-100: 0=very bearish, 50=neutral, 100=very bullish for Indian equities.
-For topics with recent news: return score + finding (max 12 words, one crisp fact).
+For topics with recent news: return score + finding written as follows:
+- Include specific numbers where available (e.g. ₹14,848 Cr, $106/barrel, ₹96/USD)
+- Write in plain simple English — imagine explaining to someone who is not an economist
+- End with what it means for the Indian stock market in one short phrase
+- Max 20 words total
+- Example good finding: "FIIs sold ₹14,848 Cr this week — foreign money leaving India, bearish for markets"
+- Example good finding: "Crude at $106/barrel — higher fuel costs hurt companies, bad for most sectors"
+- Example bad finding: "FII outflows persist amid global risk-off sentiment" (too jargon-heavy, no numbers)
+
+Avoid these jargon terms — use plain alternatives instead:
+  H1/H2          → first half of year / second half of year
+  risk-off        → investors avoiding risk
+  hawkish         → likely to raise interest rates
+  dovish          → likely to cut interest rates
+  basis points    → write as actual % change
+  YTD             → since January this year
+  QoQ / MoM       → vs last quarter / vs last month
+  liquidity       → available cash in the market
+  sentiment       → mood / confidence of investors
+  headwind        → something making it harder
+  tailwind        → something helping it grow
+
 For topics with no recent news in last 14 days: return null.
 
-For "summary": write exactly ONE sentence (max 20 words) that tells a trader what 
-the macro environment means for Indian equities THIS week. Be specific — mention 
-actual data points found. Name sectors if relevant. No generic statements.
-Example: "Crude at $106 and rupee at ₹96 favour Pharma exporters; avoid Metal and Energy this week."
+For "summary": write ONE sentence (max 20 words) that tells a trader what to do 
+this week. Be specific with numbers. Plain English. No jargon.
+Example: "FIIs selling and crude at $106 — be cautious, only hold Pharma and FMCG this week."
 
 Example of null topic:
   "rbi_policy": null
