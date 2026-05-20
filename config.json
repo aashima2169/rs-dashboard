@@ -212,6 +212,14 @@
             "Infra",
             "Realty"
           ]
+        },
+        "us_bond_yields": {
+          "query": "US 10 year bond yield treasury impact India stocks latest 2026",
+          "weight": 10
+        },
+        "gold_silver": {
+          "query": "gold silver price surge impact India equity market latest 2026",
+          "weight": 8
         }
       }
     },
