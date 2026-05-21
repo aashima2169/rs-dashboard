@@ -67,7 +67,7 @@ export default function App() {
             Sector Strength Tracker
           </h1>
           <p className="text-[14px] text-gray-500 mt-1.5">
-            The market moves in sectors. Start there.
+            Sector first. Stock second. Trade with conviction.
           </p>
         </div>
 
