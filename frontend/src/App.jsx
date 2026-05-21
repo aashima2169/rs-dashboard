@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getLatestScanDate, getSectorScores, getMacroSummary, getMacroFindings } from './lib/supabase'
 import { Header }       from './components/Header'
-import { SectorTable }  from './components/SectorTable'
+import { SectorHeatmap } from './components/SectorHeatmap'
 import { MacroSignals } from './components/MacroSignals'
 
 function Spinner() {
@@ -77,7 +77,7 @@ export default function App() {
         {!loading && !error && (
           <>
             <Header macro={macro} sectorCounts={counts} />
-            <SectorTable sectors={sectors} />
+            <SectorHeatmap sectors={sectors} />
             <MacroSignals findings={findings} />
           </>
         )}
