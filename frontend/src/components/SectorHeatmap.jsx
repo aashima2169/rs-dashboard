@@ -2,17 +2,20 @@ import { useState } from 'react'
 
 const STATUS_STYLES = {
   STRONG: {
-    card  : 'bg-green-50 border-green-400',
+    card  : 'border-green-400',
+    cardBg: '#F0FDF4',
     prc   : 'text-green-600',
     badge : 'bg-green-600 text-white',
   },
   MIXED: {
-    card  : 'bg-orange-50 border-orange-400',
-    prc   : 'text-orange-500',
-    badge : 'bg-orange-500 text-white',
+    card  : 'border-amber-400',
+    cardBg: '#FFFBEB',
+    prc   : 'text-amber-600',
+    badge : 'bg-amber-500 text-white',
   },
   WEAK: {
-    card  : 'bg-red-50 border-red-400',
+    card  : 'border-red-400',
+    cardBg: '#FEF2F2',
     prc   : 'text-red-600',
     badge : 'bg-red-600 text-white',
   },
@@ -36,6 +39,7 @@ function SectorCard({ row }) {
     <div
       onClick={() => setOpen(o => !o)}
       className={`relative rounded-xl border cursor-pointer transition-all duration-150 select-none ${s.card} ${open ? 'shadow-md' : 'hover:-translate-y-0.5 hover:shadow-sm'}`}
+      style={{ backgroundColor: s.cardBg }}
     >
       {/* Badge */}
       <span className={`absolute top-2.5 right-2.5 text-[10px] font-bold px-2 py-0.5 rounded-full ${s.badge}`}>
@@ -61,7 +65,7 @@ function SectorCard({ row }) {
 
       {/* Expanded detail */}
       {open && (
-        <div className="px-3.5 pb-3.5 pt-0 border-t border-black/5 mt-0">
+        <div className="px-3.5 pb-3.5 pt-0 border-t border-gray-200 mt-0">
           <div className="space-y-1.5 pt-3">
             {[
               { label: 'Momentum Score', value: `${row.prc}/100` },
