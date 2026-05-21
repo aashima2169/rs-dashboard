@@ -79,8 +79,8 @@ export function Header({ macro, sectorCounts }) {
           </MetricTile>
 
           <MetricTile label="Last Updated">
-            <span className="text-[22px] font-bold text-gray-900 leading-none">{scanDate}</span>
-            <span className="text-[11px] text-gray-400 mt-0.5">Updates daily after market close</span>
+            <span className="text-[20px] font-bold text-gray-900 leading-none">{scanDate}</span>
+            <span className="text-[10px] text-gray-400 mt-0.5 text-center">Updates daily after market close</span>
           </MetricTile>
 
           <MetricTile label="Sectors Strong">
