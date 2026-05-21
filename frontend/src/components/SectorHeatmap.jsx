@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Tooltip } from './Tooltip'
 
 const STATUS_STYLES = {
   STRONG: {
@@ -45,13 +44,18 @@ function SectorCard({ row }) {
 
       {/* Default view */}
       <div className="p-3.5 pr-16">
-        <p className="font-semibold text-gray-900 text-[14px] mb-1.5">{row.sector}</p>
-        <p className={`text-[24px] font-semibold leading-none mb-2 ${s.prc}`}>{row.prc}</p>
-        <div className="flex items-center gap-2 text-[12px] text-gray-500">
-          <PctVal value={row.p3} />
-          <span>3M</span>
-          <PctVal value={row.p6} />
-          <span>6M</span>
+        <p className="font-semibold text-gray-900 text-[14px] mb-2">{row.sector}</p>
+        <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">Momentum Score</p>
+        <p className={`text-[26px] font-semibold leading-none mb-3 ${s.prc}`}>{row.prc}<span className="text-[13px] font-normal text-gray-400 ml-1">/100</span></p>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-gray-400">3M vs Nifty</span>
+            <PctVal value={row.p3} />
+          </div>
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-gray-400">6M vs Nifty</span>
+            <PctVal value={row.p6} />
+          </div>
         </div>
       </div>
 
@@ -125,20 +129,7 @@ export function SectorHeatmap({ sectors }) {
       {!collapsed && (
         <div className="px-5 pb-5">
 
-          {/* Column header labels */}
-          <div className="hidden sm:grid grid-cols-4 gap-2 mb-2 px-1">
-            {[
-              { label: 'Sector',         tip: 'Name of the NSE sector index.' },
-              { label: 'Momentum Score', tip: 'Score 0–100. How strong this sector is vs its own past 12 months. Above 60 = strong. Below 40 = weak.' },
-              { label: '3M RS',          tip: 'How much this sector has beaten or trailed Nifty 50 in the last 3 months.' },
-              { label: '6M RS',          tip: 'Same as 3M but over 6 months. Both positive = sustained strength.' },
-            ].map(({ label, tip }) => (
-              <div key={label} className="flex items-center">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</span>
-                <Tooltip text={tip} />
-              </div>
-            ))}
-          </div>
+
 
           {/* Tabs */}
           <div className="flex items-center gap-2 flex-wrap mb-4">
