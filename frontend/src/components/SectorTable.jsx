@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { Tooltip } from './Tooltip'
 
 const STATUS_STYLES = {
-  STRONG : { border: 'border-l-[3px] border-green-500', badge: 'bg-green-50 text-green-700 border border-green-200' },
-  MIXED  : { border: 'border-l-[3px] border-amber-400', badge: 'bg-amber-50 text-amber-700 border border-amber-200' },
-  WEAK   : { border: 'border-l-[3px] border-red-500',   badge: 'bg-red-50 text-red-600 border border-red-200'       },
+  STRONG : { border: 'border-l-4 border-green-500', badge: 'bg-green-50 text-green-700 border border-green-200' },
+  MIXED  : { border: 'border-l-4 border-amber-400', badge: 'bg-amber-50 text-amber-700 border border-amber-200' },
+  WEAK   : { border: 'border-l-4 border-red-500',   badge: 'bg-red-50 text-red-600 border border-red-200'       },
 }
 
 function PctCell({ value }) {
@@ -50,7 +50,7 @@ function SectorCard({ row }) {
 function SectorRow({ row }) {
   const s = STATUS_STYLES[row.category] ?? STATUS_STYLES.MIXED
   return (
-    <tr className={`border-b border-gray-50 hover:bg-gray-50/80 transition-colors ${s.border}`}>
+    <tr className={`hover:bg-gray-50/80 transition-colors ${s.border}`} style={{borderBottom: '1px solid #F9FAFB'}}>
       <td className="py-4 pl-5 pr-3 font-semibold text-gray-900 text-[14px]">{row.sector}</td>
       <td className="py-4 px-3 text-gray-700 text-[14px]">{row.prc}</td>
       <td className="py-4 px-3 text-[14px]"><PctCell value={row.p3} /></td>
