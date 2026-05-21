@@ -46,21 +46,21 @@ function SectorCard({ row }) {
   )
 }
 
-// Desktop table row
+// Desktop row
 function SectorRow({ row }) {
   const s = STATUS_STYLES[row.category] ?? STATUS_STYLES.MIXED
   return (
-    <tr className={`hover:bg-gray-50/80 transition-colors ${s.border}`} style={{borderBottom: '1px solid #F9FAFB'}}>
-      <td className="py-4 pl-5 pr-3 font-semibold text-gray-900 text-[14px]">{row.sector}</td>
-      <td className="py-4 px-3 text-gray-700 text-[14px]">{row.prc}</td>
-      <td className="py-4 px-3 text-[14px]"><PctCell value={row.p3} /></td>
-      <td className="py-4 px-3 text-[14px]"><PctCell value={row.p6} /></td>
-      <td className="py-4 pl-3 pr-5">
+    <div className={`grid grid-cols-5 items-center bg-white rounded-xl border border-gray-100 shadow-sm hover:bg-gray-50 transition-colors overflow-hidden ${s.border}`}>
+      <div className="py-4 pl-5 pr-3 font-semibold text-gray-900 text-[14px]">{row.sector}</div>
+      <div className="py-4 px-3 text-gray-700 text-[14px]">{row.prc}</div>
+      <div className="py-4 px-3 text-[14px]"><PctCell value={row.p3} /></div>
+      <div className="py-4 px-3 text-[14px]"><PctCell value={row.p6} /></div>
+      <div className="py-4 pl-3 pr-5">
         <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${s.badge}`}>
           {row.category}
         </span>
-      </td>
-    </tr>
+      </div>
+    </div>
   )
 }
 
@@ -136,32 +136,26 @@ export function SectorTable({ sectors }) {
           </div>
 
           {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  {[
-                    { label: 'SECTOR',         tip: 'Name of the NSE sector index. Each sector groups similar companies — e.g. Pharma = pharmaceutical companies, Metal = mining and steel.' },
-                    { label: 'MOMENTUM SCORE', tip: 'Score from 0–100. How strong this sector is right now vs its own past 12 months. Above 60 = strong. 40–60 = average. Below 40 = weak.' },
-                    { label: '3M RS',          tip: 'How much this sector has beaten or trailed Nifty 50 in the last 3 months. Positive = doing better than the market.' },
-                    { label: '6M RS',          tip: 'Same as 3M but over 6 months. When both 3M and 6M are positive, the sector has lasting strength — not just a short-term spike.' },
-                    { label: 'STATUS',         tip: 'STRONG = beating the market on both 3M and 6M. MIXED = beating one, lagging the other. WEAK = lagging both.' },
-                  ].map(({ label, tip }) => (
-                    <th key={label} className="py-3 px-3 first:pl-5 last:pr-5 text-left">
-                      <div className="flex items-center">
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                          {label}
-                        </span>
-                        <Tooltip text={tip} />
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(row => <SectorRow key={row.sector} row={row} />)}
-              </tbody>
-            </table>
+          <div className="hidden sm:block px-4 pb-4">
+            {/* Header row */}
+            <div className="grid grid-cols-5 px-4 pb-2">
+              {[
+                { label: 'SECTOR',         tip: 'Name of the NSE sector index. Each sector groups similar companies — e.g. Pharma = pharmaceutical companies, Metal = mining and steel.' },
+                { label: 'MOMENTUM SCORE', tip: 'Score from 0–100. How strong this sector is right now vs its own past 12 months. Above 60 = strong. 40–60 = average. Below 40 = weak.' },
+                { label: '3M RS',          tip: 'How much this sector has beaten or trailed Nifty 50 in the last 3 months. Positive = doing better than the market.' },
+                { label: '6M RS',          tip: 'Same as 3M but over 6 months. When both 3M and 6M are positive, the sector has lasting strength — not just a short-term spike.' },
+                { label: 'STATUS',         tip: 'STRONG = beating the market on both 3M and 6M. MIXED = beating one, lagging the other. WEAK = lagging both.' },
+              ].map(({ label, tip }) => (
+                <div key={label} className="flex items-center">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{label}</span>
+                  <Tooltip text={tip} />
+                </div>
+              ))}
+            </div>
+            {/* Data rows */}
+            <div className="space-y-1.5">
+              {filtered.map(row => <SectorRow key={row.sector} row={row} />)}
+            </div>
           </div>
         </>
       )}
