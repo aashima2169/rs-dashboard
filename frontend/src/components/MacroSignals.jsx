@@ -73,11 +73,13 @@ function Column({ cfgKey, findings }) {
       {/* Column header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className={`${cfg.pillCls} text-[12px] font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5`}>
-            <span className="w-1.5 h-1.5 bg-white/70 rounded-full" />
-            {cfg.label}
+          <div className="flex items-center gap-2">
+            <span className={`${cfg.pillCls} text-[12px] font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5`}>
+              <span className="w-1.5 h-1.5 bg-white/70 rounded-full" />
+              {cfg.label}
+            </span>
             <Tooltip text={cfg.tooltip} />
-          </span>
+          </div>
         </div>
         <span className="text-[12px] text-gray-400 font-medium">
           {count} {count === 1 ? 'factor' : 'factors'}
