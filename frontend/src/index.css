@@ -3,39 +3,11 @@
 @tailwind utilities;
 
 @layer base {
+  * { box-sizing: border-box; }
   body {
-    font-family: 'Inter', system-ui, sans-serif;
-    background-color: #F8F9FA;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #F1F5F9;
     color: #111827;
-  }
-}
-
-@layer components {
-  .card {
-    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
-  }
-
-  .pill-strong {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700;
-  }
-
-  .pill-mixed {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700;
-  }
-
-  .pill-weak {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700;
-  }
-
-  .tooltip-container {
-    @apply relative inline-flex items-center;
-  }
-
-  .tooltip-box {
-    @apply absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-900 text-white text-xs rounded-lg p-3 leading-relaxed z-50 hidden;
-  }
-
-  .tooltip-container:hover .tooltip-box {
-    @apply block;
+    -webkit-font-smoothing: antialiased;
   }
 }
