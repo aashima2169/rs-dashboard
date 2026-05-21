@@ -1,43 +1,52 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 
 export function Tooltip({ text }) {
-  const [show, setShow] = useState(false)
-  const ref = useRef(null)
+  const [pos, setPos]   = useState(null)
+  const iconRef         = useRef(null)
 
-  useEffect(() => {
-    function handleClick(e) {
-      if (ref.current && !ref.current.contains(e.target)) setShow(false)
+  function handleEnter() {
+    if (iconRef.current) {
+      const rect = iconRef.current.getBoundingClientRect()
+      setPos({
+        top : rect.top + window.scrollY - 8,
+        left: rect.left + rect.width / 2,
+      })
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  }
+
+  function handleLeave() {
+    setPos(null)
+  }
 
   return (
-    <span
-      ref={ref}
-      className="relative inline-flex items-center"
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onClick={() => setShow(s => !s)}
-    >
-      <svg
-        className="w-3.5 h-3.5 text-gray-400 ml-1 cursor-help flex-shrink-0"
-        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+    <>
+      <span
+        ref={iconRef}
+        className="inline-flex items-center justify-center w-[15px] h-[15px] ml-1 rounded-full border border-gray-300 text-gray-400 text-[9px] font-bold cursor-help select-none flex-shrink-0"
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        onClick={() => pos ? setPos(null) : handleEnter()}
       >
-        <circle cx="12" cy="12" r="10" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-4M12 8h.01" />
-      </svg>
-      {show && (
-        <span
-          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-[9999]"
-          style={{ width: '220px' }}
+        i
+      </span>
+
+      {pos && (
+        <div
+          className="fixed z-[9999] pointer-events-none"
+          style={{
+            top     : pos.top,
+            left    : pos.left,
+            transform: 'translate(-50%, -100%)',
+          }}
         >
-          <span className="block bg-gray-900 text-white text-xs rounded-lg px-3 py-2.5 leading-relaxed shadow-2xl">
+          <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2.5 leading-relaxed shadow-2xl w-56">
             {text}
-          </span>
-          <span className="block w-0 h-0 mx-auto border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-900" />
-        </span>
+          </div>
+          <div className="flex justify-center">
+            <div className="border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-900 w-0 h-0" />
+          </div>
+        </div>
       )}
-    </span>
+    </>
   )
 }
