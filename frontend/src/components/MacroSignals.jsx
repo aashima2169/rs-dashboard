@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Tooltip } from './Tooltip'
 
 const LABEL_MAP = {
   fii_dii_flows    : 'FII / DII Flows',
@@ -72,13 +71,17 @@ function Column({ cfgKey, findings }) {
     <div className="flex flex-col gap-3">
       {/* Column header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            <span className={`${cfg.pillCls} text-[12px] font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5`}>
-              <span className="w-1.5 h-1.5 bg-white/70 rounded-full" />
-              {cfg.label}
-            </span>
-            <Tooltip text={cfg.tooltip} />
+        <div className="relative flex items-center gap-2 group">
+          <span className={`${cfg.pillCls} text-[12px] font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5`}>
+            <span className="w-1.5 h-1.5 bg-white/70 rounded-full" />
+            {cfg.label}
+          </span>
+          <span className="inline-flex items-center justify-center w-[15px] h-[15px] rounded-full border border-gray-300 text-gray-400 text-[9px] font-bold cursor-help select-none">
+            i
+          </span>
+          <div className="absolute left-0 top-full mt-2 w-56 bg-gray-900 text-white text-xs rounded-lg px-3 py-2.5 leading-relaxed shadow-2xl z-50 hidden group-hover:block pointer-events-none">
+            {cfg.tooltip}
+            <div className="absolute bottom-full left-6 border-4 border-transparent border-b-gray-900" />
           </div>
         </div>
         <span className="text-[12px] text-gray-400 font-medium">
@@ -105,9 +108,12 @@ export function MacroSignals({ findings }) {
 
   const grouped = { POSITIVE: [], NEUTRAL: [], BEARISH: [] }
   findings.forEach(f => grouped[toColKey(f.sentiment)].push(f))
+  
+  // Debug: log findings to console
+  console.log('MacroSignals findings:', findings.length, findings.map(f => ({topic: f.topic, sentiment: f.sentiment})))
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
       {/* Section header */}
       <button
         className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50/60 transition-colors"
