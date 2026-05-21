@@ -1,0 +1,34 @@
+name: VCP Scanner
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 11 * * 1-5'   # Mon-Fri 5PM IST
+
+jobs:
+  vcp-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas yfinance numpy supabase
+
+      - name: Run VCP Scanner
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python vcp_scanner.py
+
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcp-results
+          path: vcp_results.csv
