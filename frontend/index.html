@@ -1,41 +1,15 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  body {
-    font-family: 'Inter', system-ui, sans-serif;
-    background-color: #F8F9FA;
-    color: #111827;
-  }
-}
-
-@layer components {
-  .card {
-    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
-  }
-
-  .pill-strong {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700;
-  }
-
-  .pill-mixed {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700;
-  }
-
-  .pill-weak {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700;
-  }
-
-  .tooltip-container {
-    @apply relative inline-flex items-center;
-  }
-
-  .tooltip-box {
-    @apply absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-900 text-white text-xs rounded-lg p-3 leading-relaxed z-50 hidden;
-  }
-
-  .tooltip-container:hover .tooltip-box {
-    @apply block;
-  }
-}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sector Strength Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
