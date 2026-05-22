@@ -19,13 +19,26 @@ def get_gemini():
     if not GEMINI_API_KEY:
         print("⚠️  GEMINI_API_KEY not set — LLM decision skipped")
         return None
+
+    # Print masked key so we can confirm which key is being used
+    masked = GEMINI_API_KEY[:8] + "..." + GEMINI_API_KEY[-4:]
+    print(f"🔑 Using Gemini key: {masked}")
+
     try:
         from google import genai
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        print("✅ Gemini client ready")
-        return client
+
+        # Test the key with a minimal call before the main prompt
+        test_client = genai.Client(api_key=GEMINI_API_KEY)
+        test_resp   = test_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="Reply with the word OK only.",
+        )
+        test_text = test_resp.text.strip()
+        print(f"✅ Gemini key verified — test response: {test_text[:20]}")
+        return test_client
+
     except Exception as e:
-        print(f"❌ Gemini setup failed: {e}")
+        print(f"❌ Gemini key verification failed: {type(e).__name__}: {e}")
         return None
 
 
@@ -215,7 +228,6 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
             config=types.GenerateContentConfig(
                 temperature=0.2,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
-                timeout=30,
             ),
         )
 
