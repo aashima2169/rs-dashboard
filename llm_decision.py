@@ -215,12 +215,12 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
         from google import genai
         from google.genai import types
 
-        print("  📡 Calling Gemini with Google Search grounding (30s timeout)...")
+        print("  📡 Calling Gemini with Google Search grounding (90s timeout)...")
         import signal
         def handler(signum, frame):
             raise TimeoutError("Gemini call timed out after 30s")
         signal.signal(signal.SIGALRM, handler)
-        signal.alarm(30)
+        signal.alarm(90)
 
         response = client.models.generate_content(
             model="gemini-2.5-flash",
