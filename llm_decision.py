@@ -81,7 +81,9 @@ Based on findings and quantitative signals, return ONLY valid JSON:
     "geopolitical_war" : {{"score": 0, "finding": "what you found"}},
     "customs_duty_bans": {{"score": 0, "finding": "what you found"}},
     "healthcare_virus" : {{"score": 0, "finding": "what you found"}},
-    "domestic_policy"  : {{"score": 0, "finding": "what you found"}}
+    "domestic_policy"  : {{"score": 0, "finding": "what you found"}},
+    "us_bond_yields"   : {{"score": 0, "finding": "what you found"}},
+    "gold_silver"      : {{"score": 0, "finding": "what you found"}}
   }},
   "sector_flags": {{
     "tailwind": [{{"sector": "Name", "reason": "reason"}}],
@@ -122,6 +124,12 @@ Avoid these jargon terms — use plain alternatives instead:
   tailwind        → something helping it grow / working in favour
   equities        → stocks
   Indian equities → Indian stocks
+  bond yields     → interest rate that US government pays to borrow money
+  yield rising    → borrowing costs going up globally, bad for stocks
+  yield falling   → borrowing costs going down, good for stocks
+  safe haven      → assets people buy when scared (gold, bonds)
+  risk-on         → investors buying stocks confidently
+  risk-off        → investors moving money to safety
 
 For topics with no recent news in last 14 days: return null.
 
@@ -194,7 +202,12 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
         from google import genai
         from google.genai import types
 
-        print("  📡 Calling Gemini with Google Search grounding...")
+        print("  📡 Calling Gemini with Google Search grounding (30s timeout)...")
+        import signal
+        def handler(signum, frame):
+            raise TimeoutError("Gemini call timed out after 30s")
+        signal.signal(signal.SIGALRM, handler)
+        signal.alarm(30)
 
         response = client.models.generate_content(
             model="gemini-2.5-flash",
@@ -202,9 +215,11 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
             config=types.GenerateContentConfig(
                 temperature=0.2,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
+                timeout=30,
             ),
         )
 
+        signal.alarm(0)  # Cancel timeout
         raw = response.text.strip()
 
         # Strip markdown fences if present
@@ -226,6 +241,9 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
 
     except json.JSONDecodeError as e:
         print(f"  ❌ JSON parse failed: {e}")
+        return _fallback_decision(quant_score, config)
+    except TimeoutError as e:
+        print(f"  ❌ Gemini timed out: {e}")
         return _fallback_decision(quant_score, config)
     except Exception as e:
         print(f"  ❌ Gemini call failed: {type(e).__name__}: {e}")
