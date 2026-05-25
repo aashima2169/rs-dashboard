@@ -3,7 +3,8 @@ name: Scout Agent — Sector RS Report
 on:
   workflow_dispatch:
   schedule:
-    - cron: '00 12 * * 1-5'   # Mon-Fri 5:30 PM IST (12:00 UTC)
+    - cron: '00 12 * * 1-5'   # Mon-Fri 5:30 PM IST — full pipeline
+    - cron: '30 11 * * 0'     # Sunday 5:00 PM IST — macro only
 
 jobs:
   scout:
@@ -21,8 +22,9 @@ jobs:
         run: |
           pip install requests pandas yfinance numpy supabase google-genai
 
-      # ── Step 1: Scout Agent ───────────────────────────────────────────────
+      # ── Step 1: Scout Agent (weekdays only) ───────────────────────────────
       - name: Run Scout Agent
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && contains(github.event.schedule, '00 12'))
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -30,7 +32,7 @@ jobs:
           SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
         run: python agent.py
 
-      # ── Step 2: Macro Agent ───────────────────────────────────────────────
+      # ── Step 2: Macro Agent (every day including Sunday) ──────────────────
       - name: Run Macro Agent
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
