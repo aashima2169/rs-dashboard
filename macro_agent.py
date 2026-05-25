@@ -162,13 +162,30 @@ def run_macro_agent():
     with open("config.json", "r") as f:
         config = json.load(f)
 
+    # Try local file first (weekday runs), fall back to Supabase (Sunday runs)
+    sector_scores = []
     try:
         with open("sector_scores.json", "r") as f:
             sector_scores = json.load(f)
-        print(f"📂 Loaded {len(sector_scores)} sector scores")
+        print(f"📂 Loaded {len(sector_scores)} sector scores from file")
     except FileNotFoundError:
-        print("❌ sector_scores.json not found — run agent.py first")
-        return
+        print("📂 sector_scores.json not found — reading from Supabase")
+        try:
+            from supabase import create_client
+            sb_temp = create_client(SUPABASE_URL, SUPABASE_KEY)
+            latest  = sb_temp.table("sector_scores")                              .select("scan_date")                              .order("scan_date", desc=True)                              .limit(1).execute()
+            if latest.data:
+                latest_date = latest.data[0]["scan_date"]
+                rows = sb_temp.table("sector_scores")                               .select("*")                               .eq("scan_date", latest_date)                               .execute()
+                sector_scores = [
+                    {"name": r["sector"], "prc": r["prc"],
+                     "p3": r["p3"], "p6": r["p6"], "category": r["category"]}
+                    for r in rows.data
+                ]
+                print(f"📂 Loaded {len(sector_scores)} sector scores from Supabase ({latest_date})")
+        except Exception as e:
+            print(f"❌ Could not load sector scores: {e}")
+            sector_scores = []
 
     today     = str(date.today())
     today_fmt = date.today().strftime("%d %b %Y")
@@ -208,19 +225,36 @@ def run_macro_agent():
     print("💾 macro_output.json saved")
 
     # ── Telegram Message 4 — Macro summary ───────────────────────────────────
+    from datetime import datetime
+    is_sunday = datetime.now().weekday() == 6
+    prefix    = "📋 *Monday Prep* — " if is_sunday else ""
     if summary:
-        msg4 = f"{regime_emoji} *Macro ({regime}):* {summary}"
+        msg4 = f"{prefix}{regime_emoji} *Macro ({regime}):* {summary}"
         send_telegram(msg4)
 
     # ── Telegram Message 5 — Macro findings ──────────────────────────────────
     if active:
         msg5 = f"📰 Macro Findings — {today_fmt}\n"
+        label_map = {
+            "fii_dii_flows"    : "FII / DII Flows",
+            "rbi_policy"       : "RBI Policy",
+            "rupee_dollar"     : "Rupee vs Dollar",
+            "crude_oil"        : "Crude Oil",
+            "global_risk"      : "Global Risk",
+            "tariffs_trade"    : "Tariffs & Trade",
+            "geopolitical_war" : "Geopolitical Risk",
+            "customs_duty_bans": "Customs & Duties",
+            "healthcare_virus" : "Health Risk",
+            "domestic_policy"  : "India Policy",
+            "us_bond_yields"   : "US Bond Yields",
+            "gold_silver"      : "Gold & Silver",
+        }
         for key, val in active.items():
             score   = val.get("score", 50)
             finding = val.get("finding", "")
             short   = finding.replace(";", ".").split(".")[0].strip()
             bar     = "🟢" if isinstance(score, int) and score >= 65 else "🔴" if isinstance(score, int) and score <= 35 else "🟡"
-            label   = key.replace("_", " ").title()[:12]
+            label   = label_map.get(key, key.replace("_", " ").title())[:16]
             msg5   += f"{bar} {label}: {short}\n"
         send_telegram(msg5, use_markdown=False)
 
