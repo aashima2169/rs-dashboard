@@ -3,7 +3,7 @@ name: Scout Agent — Sector RS Report
 on:
   workflow_dispatch:
   schedule:
-    - cron: '00 12 * * 1-5'   # Mon-Fri 5:30 PM IST — full pipeline
+   - cron: '00 11 * * 1-5'   # 4:30 PM IST — runs by 5:30 PM IST accounting for delay
     - cron: '30 11 * * 0'     # Sunday 5:00 PM IST — macro only
 
 jobs:
