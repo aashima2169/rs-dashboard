@@ -5,7 +5,7 @@
     "Commodities": "^CNXCMDT",
     "Consumption": "^CNXCONSUM",
     "Energy": "^CNXENERGY",
-    "FinServices": "^CNXFINSERV",
+    "FinServices": "^CNXFIN",
     "FMCG": "^CNXFMCG",
     "Infra": "^CNXINFRA",
     "IT": "^CNXIT",
