@@ -3,7 +3,7 @@ name: Scout Agent — Sector RS Report
 on:
   workflow_dispatch:
   schedule:
-   - cron: '00 11 * * 1-5'   # 4:30 PM IST — runs by 5:30 PM IST accounting for delay
+    - cron: '00 11 * * 1-5'   # Mon-Fri 4:30 PM IST (accounts for GitHub delay)
     - cron: '30 11 * * 0'     # Sunday 5:00 PM IST — macro only
 
 jobs:
@@ -24,7 +24,9 @@ jobs:
 
       # ── Step 1: Scout Agent (weekdays only) ───────────────────────────────
       - name: Run Scout Agent
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && contains(github.event.schedule, '00 12'))
+        if: |
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'schedule' && github.event.schedule == '00 11 * * 1-5')
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -32,7 +34,7 @@ jobs:
           SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
         run: python agent.py
 
-      # ── Step 2: Macro Agent (every day including Sunday) ──────────────────
+      # ── Step 2: Macro Agent (weekdays + Sunday) ───────────────────────────
       - name: Run Macro Agent
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
