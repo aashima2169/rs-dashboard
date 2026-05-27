@@ -12,6 +12,7 @@ Outputs:
 """
 
 import os
+import math
 import json
 import requests
 import pandas as pd
@@ -100,16 +101,27 @@ def send_telegram(msg, use_markdown=True):
 
 def write_scores(sb, results, scan_date):
     print(f"\n💾 Writing {len(results)} scores to Supabase...")
+
+    def clean(v):
+        """Replace NaN/Inf with None for JSON compliance"""
+        if v is None:
+            return None
+        try:
+            f = float(v)
+            return None if (math.isnan(f) or math.isinf(f)) else round(f, 2)
+        except:
+            return None
+
     try:
         rows = [
             {
                 "scan_date": scan_date,
                 "sector"   : r["name"],
                 "prc"      : r["prc"],
-                "p3"       : r["p3"],
-                "p6"       : r["p6"],
-                "r3"       : r["r3"],
-                "r6"       : r["r6"],
+                "p3"       : clean(r["p3"]),
+                "p6"       : clean(r["p6"]),
+                "r3"       : clean(r["r3"]),
+                "r6"       : clean(r["r6"]),
                 "category" : r["category"],
             }
             for r in results
