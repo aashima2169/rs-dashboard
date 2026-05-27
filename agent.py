@@ -155,10 +155,13 @@ def detect_drift(current_df, history_df):
             continue
 
         prev     = last_week.loc[sector]
+        # Handle case where multiple rows exist for same sector (take first)
+        if isinstance(prev, pd.DataFrame):
+            prev = prev.iloc[0]
         prc_now  = row["prc"]
-        prc_prev = int(prev["prc"])
+        prc_prev = int(float(prev["prc"]))
         cat_now  = row["category"]
-        cat_prev = prev["category"]
+        cat_prev = prev["category"] if isinstance(prev["category"], str) else str(prev["category"].iloc[0])
         delta    = prc_now - prc_prev
 
         if cat_now != cat_prev:
