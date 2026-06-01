@@ -1,21 +1,14 @@
 """
-macro_agent.py (UPDATED)
---------------
-Orchestrates the macro analysis layer.
-Runs AFTER agent.py has completed.
-
-CHANGES:
-  - Added write_eval_prediction() function
-  - Calls it right after get_llm_decision()
-  - Logs prediction to eval_daily table for backtesting
+macro_agent.py (SIMPLIFIED VERSION)
+------------------------------------
+Now just reads the eval_daily row (created by agent.py) and UPDATEs it with prediction.
 
 Flow:
-  1. Reads sector_scores.json (written by agent.py)
-  2. Fetches quantitative signals via market_context.py
-  3. Calls Gemini for macro analysis via llm_decision.py
-  4. ✅ NEW: Logs prediction to eval_daily table
-  5. Writes macro_summaries + macro_findings to Supabase
-  6. Sends Telegram messages
+  1. agent.py (7:30 PM): INSERTs eval_daily with actual_regime + OHLC
+  2. macro_agent.py (7:30 PM): UPDATEs eval_daily with prediction + is_correct
+  3. Done!
+
+Runs AFTER agent.py has completed.
 """
 
 import os
@@ -94,38 +87,76 @@ def write_macro_findings(sb, macro_scores: dict, scan_date: str):
         print(f"❌ write_macro_findings failed: {type(e).__name__}: {e}")
 
 
-# ✅ NEW FUNCTION: Log prediction to eval_daily for backtesting
-def write_eval_prediction(sb, decision: dict, scan_date: str):
+# ✅ NEW: Update eval_daily with prediction + is_correct
+def update_eval_prediction(sb, decision: dict, scan_date: str):
     """
-    Logs today's prediction to eval_daily table.
-    Will be compared with actual Nifty return after market close.
+    agent.py already created the eval_daily row with actual_regime.
+    This UPDATE adds the prediction and computes is_correct.
     
     Args:
         sb: Supabase client
-        decision: dict from get_llm_decision() containing regime, final_score
-        scan_date: str (YYYY-MM-DD format)
+        decision: dict from get_llm_decision() with regime, final_score
+        scan_date: str (YYYY-MM-DD)
     """
     try:
         regime = decision.get("regime")
         score = decision.get("final_score")
         
-        # Skip if incomplete
         if not regime or score is None:
-            print("⚠️  Incomplete decision data, skipping eval_daily insert")
+            print("⚠️  Incomplete decision, skipping eval_daily update")
             return
         
-        row = {
-            "prediction_date": scan_date,
+        # Fetch the row that agent.py created
+        result = sb.table("eval_daily") \
+            .select("*") \
+            .eq("prediction_date", scan_date) \
+            .execute()
+        
+        if not result.data:
+            print(f"⚠️  No eval_daily row found for {scan_date}")
+            return
+        
+        eval_row = result.data[0]
+        actual_regime = eval_row.get("actual_regime")
+        
+        # Compute is_correct
+        is_correct = (regime == actual_regime)
+        
+        # Log to console
+        emoji_pred = "🐂" if regime == "BULL" else "🐻" if regime == "BEAR" else "⚖️"
+        emoji_actual = "🐂" if actual_regime == "BULL" else "🐻" if actual_regime == "BEAR" else "⚖️"
+        check = "✅" if is_correct else "❌"
+        
+        print(f"\n📊 Eval Results:")
+        print(f"   Predicted: {emoji_pred} {regime} (score {score})")
+        print(f"   Actual:    {emoji_actual} {actual_regime}")
+        print(f"   Result:    {check}")
+        
+        # UPDATE eval_daily
+        sb.table("eval_daily").update({
             "predicted_regime": regime,
             "predicted_score": int(score),
-            "created_at": None,  # Will use Supabase timestamp
-        }
+            "is_correct": is_correct,
+            "evaluated_at": None,  # Supabase auto-timestamp
+        }).eq("prediction_date", scan_date).execute()
         
-        result = sb.table("eval_daily").insert(row).execute()
-        print(f"✅ eval_daily: prediction logged ({regime}, score={score})")
+        print(f"✅ eval_daily: prediction updated")
+        
+        # Query 30-day accuracy
+        results = sb.table("eval_daily") \
+            .select("is_correct") \
+            .order("prediction_date", desc=True) \
+            .limit(30) \
+            .execute()
+        
+        if results.data:
+            correct = sum(1 for r in results.data if r["is_correct"])
+            total = len(results.data)
+            accuracy = (correct / total) * 100
+            print(f"📊 30-day accuracy: {accuracy:.1f}% ({correct}/{total})")
         
     except Exception as e:
-        print(f"❌ write_eval_prediction failed: {type(e).__name__}: {e}")
+        print(f"❌ update_eval_prediction failed: {type(e).__name__}: {e}")
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
@@ -213,10 +244,16 @@ def run_macro_agent():
         try:
             from supabase import create_client
             sb_temp = create_client(SUPABASE_URL, SUPABASE_KEY)
-            latest  = sb_temp.table("sector_scores")                              .select("scan_date")                              .order("scan_date", desc=True)                              .limit(1).execute()
+            latest  = sb_temp.table("sector_scores") \
+                             .select("scan_date") \
+                             .order("scan_date", desc=True) \
+                             .limit(1).execute()
             if latest.data:
                 latest_date = latest.data[0]["scan_date"]
-                rows = sb_temp.table("sector_scores")                               .select("*")                               .eq("scan_date", latest_date)                               .execute()
+                rows = sb_temp.table("sector_scores") \
+                             .select("*") \
+                             .eq("scan_date", latest_date) \
+                             .execute()
                 sector_scores = [
                     {"name": r["sector"], "prc": r["prc"],
                      "p3": r["p3"], "p6": r["p6"], "category": r["category"]}
@@ -240,9 +277,9 @@ def run_macro_agent():
         config         = config,
     )
 
-    # ✅ NEW: Log prediction to eval_daily immediately after decision
+    # ✅ NEW: Update eval_daily with prediction + is_correct
     if sb:
-        write_eval_prediction(sb, decision, today)
+        update_eval_prediction(sb, decision, today)
 
     # ── Apply decision ────────────────────────────────────────────────────────
     adjusted     = apply_decision(sector_scores, decision)
