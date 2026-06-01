@@ -1,9 +1,15 @@
 """
-llm_decision.py
----------------
+llm_decision.py (OPTIMIZED)
+----------------------------
 Calls Gemini API with Google Search grounding to analyse
 current macro conditions and return a structured regime decision.
 Uses the new google-genai package (replaces deprecated google-generativeai).
+
+CHANGES (based on backfill accuracy analysis):
+  - BEAR threshold: 35 → 20 (was too aggressive, only 8.3% accuracy)
+  - BULL threshold: 65 → 65 (kept same, had decent accuracy)
+  - NEUTRAL: 20 < score < 65 (new explicit range)
+  - Added regime threshold logging for transparency
 """
 
 import os
@@ -176,22 +182,42 @@ def compute_qualitative_score(macro_scores, config):
     return round(weighted_sum / total_weight) if total_weight else 50
 
 
-# ── Final regime ──────────────────────────────────────────────────────────────
+# ── Final regime (OPTIMIZED) ──────────────────────────────────────────────────
 
 def compute_final_regime(quant_score, qual_score, config):
+    """
+    Compute final regime based on weighted quant + qual scores.
+    
+    THRESHOLD CHANGES (based on backfill accuracy):
+      OLD: BULL ≥65, BEAR ≤35, NEUTRAL 35-65
+      NEW: BULL ≥65, BEAR ≤20, NEUTRAL 20-65
+    
+    Rationale:
+      - Backfill showed BEAR predictions only 8.3% accurate
+      - Market was NEUTRAL (+0.2% to +0.9%) when we predicted BEAR
+      - Stricter BEAR threshold (≤20 instead of ≤35) reduces false positives
+      - BULL threshold stays at 65 (was working reasonably)
+    """
     weights     = config.get("market_signals", {}).get("weights", {})
     quant_wt    = weights.get("quantitative", 60) / 100
     qual_wt     = weights.get("qualitative", 40) / 100
     final_score = round((quant_score * quant_wt) + (qual_score * qual_wt))
+    
+    # ✅ UPDATED THRESHOLDS
     thresholds  = config.get("market_signals", {}).get("regime_thresholds", {})
-    bull_min    = thresholds.get("bull_score_min", 65)
-    bear_max    = thresholds.get("bear_score_max", 35)
+    bull_min    = thresholds.get("bull_score_min", 65)      # Unchanged
+    bear_max    = thresholds.get("bear_score_max", 20)      # CHANGED: 35 → 20
+    
+    # Log the thresholds for transparency
+    print(f"     Regime thresholds: BULL≥{bull_min} | BEAR≤{bear_max} | NEUTRAL {bear_max}<x<{bull_min}")
+    
     if final_score >= bull_min:
         regime = "BULL"
     elif final_score <= bear_max:
         regime = "BEAR"
     else:
         regime = "NEUTRAL"
+    
     return regime, final_score
 
 
@@ -298,8 +324,23 @@ def get_llm_decision(quant_score, signal_summary, sector_scores, config):
 
 
 def _fallback_decision(quant_score, config):
+    """
+    Fallback when Gemini is unavailable — use quantitative signals only.
+    Also uses updated thresholds (BEAR ≤20 instead of ≤35).
+    """
     print("  ⚠️  Fallback: quant signals only")
-    regime = "BULL" if quant_score >= 65 else "BEAR" if quant_score <= 35 else "NEUTRAL"
+    
+    # Use same optimized thresholds
+    bull_min = config.get("market_signals", {}).get("regime_thresholds", {}).get("bull_score_min", 65)
+    bear_max = config.get("market_signals", {}).get("regime_thresholds", {}).get("bear_score_max", 20)
+    
+    if quant_score >= bull_min:
+        regime = "BULL"
+    elif quant_score <= bear_max:
+        regime = "BEAR"
+    else:
+        regime = "NEUTRAL"
+    
     return {
         "regime"        : regime,
         "final_score"   : quant_score,
