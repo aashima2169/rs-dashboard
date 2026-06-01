@@ -1,0 +1,44 @@
+name: Backfill eval_daily
+
+on:
+  # Manual trigger (click "Run workflow" in Actions tab)
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'How many days to backfill (default: 20)'
+        required: false
+        default: '20'
+        type: string
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install supabase yfinance pandas
+      
+      - name: Run backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python backfill_eval_daily.py
+      
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: backfill-results
+          path: backfill_results.txt
+          retention-days: 30
