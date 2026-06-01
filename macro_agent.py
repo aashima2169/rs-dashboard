@@ -1,15 +1,21 @@
 """
-macro_agent.py
+macro_agent.py (UPDATED)
 --------------
 Orchestrates the macro analysis layer.
 Runs AFTER agent.py has completed.
+
+CHANGES:
+  - Added write_eval_prediction() function
+  - Calls it right after get_llm_decision()
+  - Logs prediction to eval_daily table for backtesting
 
 Flow:
   1. Reads sector_scores.json (written by agent.py)
   2. Fetches quantitative signals via market_context.py
   3. Calls Gemini for macro analysis via llm_decision.py
-  4. Writes macro_summaries + macro_findings to Supabase
-  5. Sends Telegram messages
+  4. ✅ NEW: Logs prediction to eval_daily table
+  5. Writes macro_summaries + macro_findings to Supabase
+  6. Sends Telegram messages
 """
 
 import os
@@ -86,6 +92,40 @@ def write_macro_findings(sb, macro_scores: dict, scan_date: str):
             print(f"✅ macro_findings written ({len(rows)} topics)")
     except Exception as e:
         print(f"❌ write_macro_findings failed: {type(e).__name__}: {e}")
+
+
+# ✅ NEW FUNCTION: Log prediction to eval_daily for backtesting
+def write_eval_prediction(sb, decision: dict, scan_date: str):
+    """
+    Logs today's prediction to eval_daily table.
+    Will be compared with actual Nifty return after market close.
+    
+    Args:
+        sb: Supabase client
+        decision: dict from get_llm_decision() containing regime, final_score
+        scan_date: str (YYYY-MM-DD format)
+    """
+    try:
+        regime = decision.get("regime")
+        score = decision.get("final_score")
+        
+        # Skip if incomplete
+        if not regime or score is None:
+            print("⚠️  Incomplete decision data, skipping eval_daily insert")
+            return
+        
+        row = {
+            "prediction_date": scan_date,
+            "predicted_regime": regime,
+            "predicted_score": int(score),
+            "created_at": None,  # Will use Supabase timestamp
+        }
+        
+        result = sb.table("eval_daily").insert(row).execute()
+        print(f"✅ eval_daily: prediction logged ({regime}, score={score})")
+        
+    except Exception as e:
+        print(f"❌ write_eval_prediction failed: {type(e).__name__}: {e}")
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
@@ -199,6 +239,10 @@ def run_macro_agent():
         sector_scores  = sector_scores,
         config         = config,
     )
+
+    # ✅ NEW: Log prediction to eval_daily immediately after decision
+    if sb:
+        write_eval_prediction(sb, decision, today)
 
     # ── Apply decision ────────────────────────────────────────────────────────
     adjusted     = apply_decision(sector_scores, decision)
