@@ -96,16 +96,24 @@ def backfill_eval_daily(days_back: int = 20):
         print("❌ Cannot proceed without Supabase")
         return
     
+    since_date = str(date.today() - timedelta(days=days_back))
+    
+    # ── Step 0: Clear old data ─────────────────────────────────────────────────
+    print(f"🧹 Clearing old eval_daily data from {since_date}...")
+    try:
+        sb.table("eval_daily").delete().gte("prediction_date", since_date).execute()
+        print(f"✅ Cleared old data\n")
+    except Exception as e:
+        print(f"⚠️  Could not clear old data: {e}\n")
+    
     # ── Step 1: Fetch historical macro_summaries ──────────────────────────────
     print(f"📖 Fetching macro_summaries from past {days_back} days...")
-    
-    since_date = str(date.today() - timedelta(days=days_back))
     
     try:
         result = sb.table("macro_summaries") \
             .select("scan_date, regime, final_score") \
             .gte("scan_date", since_date) \
-            .order("scan_date") \
+            .order("scan_date", desc=False) \
             .execute()
         
         if not result.data:
@@ -113,7 +121,15 @@ def backfill_eval_daily(days_back: int = 20):
             return
         
         summaries = pd.DataFrame(result.data)
-        print(f"✅ Found {len(summaries)} historical predictions")
+        
+        # Handle duplicates: keep only the latest (last) entry per date
+        original_count = len(summaries)
+        summaries = summaries.drop_duplicates(subset=['scan_date'], keep='last')
+        
+        if len(summaries) < original_count:
+            print(f"✅ Found {original_count} predictions, {len(summaries)} unique (removed {original_count - len(summaries)} duplicates)")
+        else:
+            print(f"✅ Found {len(summaries)} unique predictions")
         print(f"   Date range: {summaries['scan_date'].min()} to {summaries['scan_date'].max()}")
         
     except Exception as e:
@@ -198,15 +214,8 @@ def backfill_eval_daily(days_back: int = 20):
     print(f"\n💾 Inserting {len(eval_rows)} rows into eval_daily...")
     
     try:
-        # Delete existing data for these dates (to avoid duplicates)
-        dates_to_delete = [row["prediction_date"] for row in eval_rows]
-        
-        for date_str in dates_to_delete:
-            sb.table("eval_daily").delete().eq("prediction_date", date_str).execute()
-        
-        # Insert backfilled data
         sb.table("eval_daily").insert(eval_rows).execute()
-        print(f"✅ Inserted {len(eval_rows)} rows")
+        print(f"✅ Inserted {len(eval_rows)} rows successfully")
         
     except Exception as e:
         print(f"❌ Insert failed: {type(e).__name__}: {e}")
