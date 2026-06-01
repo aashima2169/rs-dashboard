@@ -48,27 +48,37 @@ def get_nifty_ohlc_bulk(start_date: str, end_date: str):
         dict keyed by date with OHLC data
     """
     try:
-        nifty = yf.download("^NSEI", start=start_date, end=end_date, progress=False)
+        nifty = yf.download("^NSEI", start=start_date, end=end_date, progress=False, auto_adjust=True)
         
         if nifty.empty:
             print(f"⚠️  No Nifty data for {start_date} to {end_date}")
             return {}
         
+        # Handle multi-level columns (yfinance sometimes returns these)
+        if isinstance(nifty.columns, pd.MultiIndex):
+            nifty.columns = nifty.columns.get_level_values(0)
+        
         result = {}
         for idx, row in nifty.iterrows():
             date_str = idx.strftime("%Y-%m-%d")
-            result[date_str] = {
-                "open": float(row["Open"]),
-                "high": float(row["High"]),
-                "low": float(row["Low"]),
-                "close": float(row["Close"]),
-            }
+            try:
+                result[date_str] = {
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                }
+            except (ValueError, TypeError) as e:
+                print(f"   ⚠️  Skipping {date_str}: {e}")
+                continue
         
         print(f"✅ Fetched Nifty OHLC for {len(result)} trading days")
         return result
         
     except Exception as e:
         print(f"❌ Failed to fetch Nifty OHLC: {e}")
+        import traceback
+        traceback.print_exc()
         return {}
 
 
