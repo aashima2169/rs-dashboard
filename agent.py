@@ -1,21 +1,13 @@
 """
-AGENT.PY - CHANGES FOR EVAL_DAILY
-==================================
+For agent.py - save_nifty_ohlc() function with fixed yfinance handling
 
-Add this function to agent.py to log Nifty OHLC + actual regime to eval_daily
-Runs at 7:30 PM after market close.
-
-macro_agent.py will UPDATE this row later with prediction + is_correct.
+Replace the old save_nifty_ohlc() function with this one:
 """
 
-# Add this function after write_scores() function (around line 100)
-
-def write_eval_nifty_actual(sb, scan_date: str):
+def save_nifty_ohlc(sb, scan_date: str):
     """
-    Fetch today's Nifty OHLC and log to eval_daily.
-    This happens at 7:30 PM after market close.
-    
-    macro_agent.py will UPDATE this row with prediction + is_correct.
+    Fetch today's Nifty OHLC and save to Supabase.
+    Called at end of agent.py before returning.
     
     Args:
         sb: Supabase client
@@ -28,6 +20,10 @@ def write_eval_nifty_actual(sb, scan_date: str):
         if nifty.empty:
             print(f"⚠️  No Nifty data for {scan_date} (market holiday?)")
             return
+        
+        # Handle multi-level columns
+        if isinstance(nifty.columns, pd.MultiIndex):
+            nifty.columns = nifty.columns.get_level_values(0)
         
         data = nifty.iloc[0]
         
@@ -62,13 +58,5 @@ def write_eval_nifty_actual(sb, scan_date: str):
         
     except Exception as e:
         print(f"⚠️  eval_daily insert failed: {type(e).__name__}: {e}")
-
-
-# In run_agent() function, at the END (right before "print('\n✅ Scout complete.')")
-# Add this:
-
-    # ✅ Log Nifty OHLC + actual regime to eval_daily
-    if sb:
-        write_eval_nifty_actual(sb, today)
-
-    print("\n✅ Scout complete.")
+        import traceback
+        traceback.print_exc()
